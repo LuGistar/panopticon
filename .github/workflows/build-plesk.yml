@@ -73,6 +73,7 @@ jobs:
           rsync -a --delete \
             --exclude='.git/' \
             --exclude='.github/' \
+            --exclude='.gitignore' \
             --exclude='.env*' \
             --exclude='config.php*' \
             --exclude='node_modules/' \
@@ -88,11 +89,14 @@ jobs:
             --exclude='README.md' \
             source/ plesk-deploy/
 
+          # The source .gitignore would hide vendor/, version.php and .htaccess from Git.
+          rm -f plesk-deploy/.gitignore
           cp source/htaccess.txt plesk-deploy/.htaccess
 
           git -C plesk-deploy config user.name "github-actions[bot]"
           git -C plesk-deploy config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C plesk-deploy add --all
+          git -C plesk-deploy ls-files --error-unmatch vendor/autoload.php version.php .htaccess
 
           if ! git -C plesk-deploy diff --cached --quiet; then
             git -C plesk-deploy commit -m "Build Panopticon from ${GITHUB_SHA}"
