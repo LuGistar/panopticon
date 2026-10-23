@@ -1,0 +1,154 @@
+<?php
+/**
+ * @package   awf
+ * @copyright Copyright (c)2014-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   GNU GPL version 3 or later
+ */
+
+namespace Awf\Mvc\DataModel\Filter;
+
+
+use Awf\Database\Driver;
+
+class Text extends AbstractFilter
+{
+	/**
+	 * Constructor
+	 *
+	 * @param   Driver  $db     The database object
+	 * @param   object  $field  The field informations as taken from the db
+	 */
+	public function __construct($db, $field)
+	{
+		parent::__construct($db, $field);
+
+		$this->null_value = '';
+	}
+
+	/**
+	 * Returns the default search method for this field.
+	 *
+	 * @return  string
+	 */
+	public function getDefaultSearchMethod()
+	{
+		return 'partial';
+	}
+
+	/**
+	 * Perform a partial match (search in string)
+	 *
+	 * @param   mixed  $value  The value to compare to
+	 *
+	 * @return  string  The SQL where clause for this search
+	 */
+	public function partial($value)
+	{
+		if ($this->isEmpty($value))
+		{
+			return '';
+		}
+
+		// escape($value, true) additionally addcslashes()-escapes '%' and '_', the two LIKE
+		// wildcard characters, so a value cannot widen its own match pattern (e.g. turn a
+		// substring search into a full-table scan / oracle for column contents). quote(...,
+		// false) suppresses a second round of escaping — quote() would otherwise re-escape
+		// what escape() already escaped, corrupting values containing quotes or backslashes.
+		// Note: '\' is the default LIKE escape character on MySQL/PostgreSQL but not SQLite, and
+		// MySQL drops it under NO_BACKSLASH_ESCAPES, so the ESCAPE clause is spelled out explicitly.
+		return '(' . $this->getFieldName() . ' LIKE '
+			. $this->db->quote('%' . $this->db->escape($value, true) . '%', false)
+			. $this->db->getLikeEscapeSql() . ')';
+	}
+
+	/**
+	 * Perform an exact match (match string)
+	 *
+	 * @param   mixed  $value  The value to compare to
+	 *
+	 * @return  string  The SQL where clause for this search
+	 */
+	public function exact($value)
+	{
+		if ($this->isEmpty($value))
+		{
+			return '';
+		}
+
+		if (is_array($value) || is_object($value))
+		{
+			$value = (array) $value;
+
+			$db    = $this->db;
+			$value = array_map([$db, 'quote'], $value);
+
+			return '(' . $this->getFieldName() . ' IN (' . implode(',', $value) . '))';
+		}
+
+		// See the comment in partial() — same wildcard-escaping / double-escaping caveats apply.
+		return '(' . $this->getFieldName() . ' LIKE '
+			. $this->db->quote($this->db->escape($value, true), false)
+			. $this->db->getLikeEscapeSql() . ')';
+	}
+
+	/**
+	 * Dummy method; this search makes no sense for text fields
+	 *
+	 * @param   mixed    $from     Ignored
+	 * @param   mixed    $to       Ignored
+	 * @param   boolean  $include  Ignored
+	 *
+	 * @return  string  Empty string
+	 */
+	public function between($from, $to, $include = true)
+	{
+		return '';
+	}
+
+	/**
+	 * Dummy method; this search makes no sense for text fields
+	 *
+	 * @param   mixed    $from     Ignored
+	 * @param   mixed    $to       Ignored
+	 * @param   boolean  $include  Ignored
+	 *
+	 * @return  string  Empty string
+	 */
+	public function outside($from, $to, $include = false)
+	{
+		return '';
+	}
+
+	/**
+	 * Dummy method; this search makes no sense for text fields
+	 *
+	 * @param   mixed    $value     Ignored
+	 * @param   mixed    $interval  Ignored
+	 * @param   boolean  $include   Ignored
+	 *
+	 * @return  string  Empty string
+	 */
+	public function interval($value, $interval, $include = true)
+	{
+		return '';
+	}
+
+	public function range($from, $to, $include = false)
+	{
+		return '';
+	}
+
+	/**
+	 * Dummy method; this search makes no sense for text fields
+	 *
+	 * @param   mixed    $from      Ignored
+	 * @param   mixed    $interval  Ignored
+	 * @param   boolean  $include   Ignored
+	 *
+	 * @return  string  Empty string
+	 */
+	public function modulo($from, $interval, $include = false)
+	{
+		return '';
+	}
+} 

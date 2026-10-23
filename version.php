@@ -1,0 +1,14 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+defined('AKEEBA') || die;
+
+const AKEEBA_PANOPTICON_VERSION  = '2.4.0';
+const AKEEBA_PANOPTICON_DATE     = '2026-10-23';
+const AKEEBA_PANOPTICON_CODENAME = 'Sunrise';
+// Keep in sync with AKEEBA_PANOPTICON_MINPHP_FALLBACK in defines.php and the `php` requirement in composer.json.
+const AKEEBA_PANOPTICON_MINPHP   = '8.3.0';
