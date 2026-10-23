@@ -86,10 +86,6 @@
 	},
 	"config": {
 		"process-timeout": 600,
-		"github-protocols": [
-			"https"
-		],
-		"preferred-install": "dist",
 		"optimize-autoloader": true,
 		"platform": {
 			"php": "8.3.999"
