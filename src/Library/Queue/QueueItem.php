@@ -1,0 +1,92 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+namespace Akeeba\Panopticon\Library\Queue;
+
+
+use JsonSerializable;
+
+defined('AKEEBA') || die;
+
+class QueueItem implements JsonSerializable
+{
+	public function __construct(private readonly mixed $data, private readonly string $queueType = 'system', private readonly ?int $siteId = null)
+	{
+		if (!is_scalar($this->data) && !is_object($this->data))
+		{
+			throw new \InvalidArgumentException(
+				sprintf(
+					'%s can only store scalars or objects', self::class
+				)
+			);
+		}
+
+		if ($this->data instanceof self || $this->data instanceof QueueInterface)
+		{
+			throw new \InvalidArgumentException(
+				sprintf(
+					'%s cannot store recursive queues or queue items', self::class
+				)
+			);
+		}
+	}
+
+	public function getData(): mixed
+	{
+		return $this->data;
+	}
+
+	public function getQueueType(): string
+	{
+		return $this->queueType;
+	}
+
+	public function getSiteId(): ?int
+	{
+		return $this->siteId;
+	}
+
+	public static function fromJson(string $json): self
+	{
+		$temp      = json_decode($json, false);
+		$data      = $temp?->data;
+		$queueType = $temp->queueType ?? 'system';
+		$siteId    = $temp?->siteId;
+		$dataType  = $temp?->dataType;
+
+		unset($temp);
+
+		switch ($dataType)
+		{
+			case 'array':
+				$data = json_decode(json_encode($data), true);
+				break;
+
+			default:
+				if (!empty($dataType) && class_exists($dataType) && is_callable([$dataType, 'fromJson']))
+				{
+					$data = call_user_func([$dataType, 'fromJson'], json_encode($data));
+				}
+
+				break;
+		}
+
+		return new self($data, $queueType, $siteId);
+	}
+
+	public function jsonSerialize(): array
+	{
+		$dataType = is_scalar($this->data) ? null : $this->data::class;
+
+		return [
+			'data' => $this->data,
+			'queueType' => $this->queueType,
+			'siteId' => $this->siteId,
+			'dataType' => $dataType
+		];
+	}
+}

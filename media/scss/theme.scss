@@ -1,0 +1,38 @@
+/*!*
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+// Akeeba grays
+$white: #ffffff;
+$gray-100: #fcfcfc;
+$gray-200: #efefef;
+$gray-300: #e6e6e6;
+$gray-400: #d6d6d6;
+$gray-500: #c2c2c2;
+$gray-600: #6b686a;
+$gray-700: #514f50;
+$gray-800: #373637;
+$gray-900: #212021;
+$black: #100010;
+
+// Akeeba colours
+$primary: #147878;
+$secondary: #514f50;
+$success: #598230;
+$info: #467d8c;
+$warning: #f0ad4e;
+$danger: #cc3136;
+$light: #efefef;
+$dark: #373637;
+
+// Accessibility tweaks
+$link-color: #116969;
+$link-color-dark: #7dcaca;
+
+$code-color: #b12a6e;
+$code-color-dark: #c22774;
+
+// Common includes
+@import "common";

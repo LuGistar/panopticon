@@ -1,0 +1,338 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+namespace Akeeba\Panopticon\Controller;
+
+use Akeeba\Panopticon\Controller\Trait\ACLTrait;
+use Akeeba\Panopticon\Library\Task\Status;
+use Akeeba\Panopticon\Model\Site;
+use Awf\Mvc\Controller;
+use Awf\Registry\Registry;
+use Awf\Uri\Uri;
+
+defined('AKEEBA') || die;
+
+class Extensioninstall extends Controller
+{
+	use ACLTrait;
+
+	public function execute($task)
+	{
+		$this->aclCheck($task);
+
+		return parent::execute($task);
+	}
+
+	public function main()
+	{
+		// When no group filter is selected we are POSTed no value. In this case, we need to unset the filter.
+		if (strtoupper($this->input->getMethod() ?? '') === 'POST')
+		{
+			$groups = $this->input->post->getRaw('group');
+
+			if ($groups === null)
+			{
+				$this->input->set('group', []);
+			}
+		}
+
+		// Create the Site model directly so it retains full input access (needed for filter state).
+		// Using $this->getModel('site') would call clearInput() on the model, preventing filter states
+		// from being read from the current request and saved to the session.
+		$siteModel   = $this->container->mvcFactory->makeModel('site', $this->getLanguage());
+		$mainModel   = $this->getModel('main');
+		$groupsModel = $this->getModel('groups');
+
+		$view = $this->getView();
+		$view->setModel('site', $siteModel);
+		$view->setModel('main', $mainModel);
+		$view->setModel('groups', $groupsModel);
+
+		parent::main();
+	}
+
+	public function review()
+	{
+		$this->csrfProtection();
+
+		// Get site IDs from POST
+		$siteIdsRaw = $this->input->post->getString('site_ids', '');
+		$siteIds    = @json_decode($siteIdsRaw, true);
+
+		if (!is_array($siteIds) || empty($siteIds))
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=extensioninstall'),
+				$this->getLanguage()->text('PANOPTICON_EXTENSIONINSTALL_ERR_NO_SITES'),
+				'error'
+			);
+
+			return;
+		}
+
+		// Validate site IDs and permissions
+		$user     = $this->container->userManager->getUser();
+		$validIds = [];
+
+		foreach ($siteIds as $siteId)
+		{
+			$siteId = (int) $siteId;
+
+			if ($siteId <= 0)
+			{
+				continue;
+			}
+
+			/** @var Site $site */
+			$site = clone $this->getModel('site');
+
+			try
+			{
+				$site->findOrFail($siteId);
+			}
+			catch (\Exception)
+			{
+				continue;
+			}
+
+			// Check per-site admin or run privilege
+			if (
+				!$user->authorise('panopticon.admin', $site)
+				&& !$user->authorise('panopticon.run', $site)
+			)
+			{
+				continue;
+			}
+
+			$validIds[] = $siteId;
+		}
+
+		if (empty($validIds))
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=extensioninstall'),
+				$this->getLanguage()->text('PANOPTICON_EXTENSIONINSTALL_ERR_NO_PERMISSION'),
+				'error'
+			);
+
+			return;
+		}
+
+		// Store in session
+		$this->container->segment->set('extensioninstall.sites', $validIds);
+
+		// Render the review view
+		$siteModel = $this->getModel('site');
+		$view      = $this->getView();
+		$view->setModel('site', $siteModel);
+
+		$view->setLayout('review');
+		$view->task = 'review';
+		$view->doTask = 'review';
+		$view->display();
+	}
+
+	public function install()
+	{
+		// PHP discards the entire POST body when it exceeds post_max_size, leaving $_POST and $_FILES
+		// empty. Detect that here — before the CSRF check, which would otherwise fail with a misleading
+		// "Invalid security token" 500 error — and show a clear message instead. The request carries no
+		// actionable data, so skipping CSRF for this pure redirect is safe.
+		if (
+			strtoupper($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+			&& empty($_POST) && empty($_FILES)
+			&& (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0
+		)
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=extensioninstall'),
+				$this->getLanguage()->text('PANOPTICON_EXTENSIONINSTALL_ERR_POST_TOO_LARGE'),
+				'error'
+			);
+
+			return;
+		}
+
+		$this->csrfProtection();
+
+		$siteIds = $this->container->segment->get('extensioninstall.sites', []);
+
+		if (empty($siteIds))
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=extensioninstall'),
+				$this->getLanguage()->text('PANOPTICON_EXTENSIONINSTALL_ERR_NO_SITES'),
+				'error'
+			);
+
+			return;
+		}
+
+		// Get the URL or file
+		$url      = trim($this->input->post->getString('url', ''));
+		$filePath = null;
+
+		// Handle file upload
+		$file = $this->input->files->get('package_file', null, 'raw');
+
+		if (!empty($file) && !empty($file['name']) && $file['error'] === UPLOAD_ERR_OK)
+		{
+			$cacheDir = APATH_CACHE . '/extension_install';
+
+			if (!is_dir($cacheDir))
+			{
+				@mkdir($cacheDir, 0755, true);
+			}
+
+			$safeName = preg_replace('/[^a-zA-Z0-9_\-.]/', '', basename($file['name']));
+
+			if (empty($safeName))
+			{
+				$safeName = 'package.zip';
+			}
+
+			$filePath = $cacheDir . '/' . $safeName;
+
+			if (file_exists($filePath))
+			{
+				// Supported package extensions, compound (tar.*) variants first so they win over
+				// their single suffix. The random uniqueness token goes BEFORE the extension so the
+				// remote site still receives a filename with a valid archive extension.
+				static $knownExtensions = [
+					'.tar.gz', '.tar.bz2', '.tar.xz', '.tar.zst', '.tar.zstd', '.tar.z', '.zip',
+				];
+
+				$lower = strtolower($safeName);
+				$ext   = '';
+				$stem  = $safeName;
+
+				foreach ($knownExtensions as $candidate)
+				{
+					if (substr($lower, -strlen($candidate)) === $candidate)
+					{
+						$ext  = substr($safeName, -strlen($candidate));
+						$stem = substr($safeName, 0, -strlen($candidate));
+
+						break;
+					}
+				}
+
+				$filePath = $cacheDir . '/' . $stem . '-' . bin2hex(random_bytes(4)) . $ext;
+			}
+
+			if (!move_uploaded_file($file['tmp_name'], $filePath))
+			{
+				$this->setRedirect(
+					$this->container->router->route('index.php?view=extensioninstall'),
+					$this->getLanguage()->text('PANOPTICON_EXTENSIONINSTALL_ERR_NO_URL_OR_FILE'),
+					'error'
+				);
+
+				return;
+			}
+		}
+		elseif (!empty($file) && !empty($file['name']) && $file['error'] !== UPLOAD_ERR_OK)
+		{
+			// A file was submitted but PHP rejected the upload (e.g. it exceeded upload_max_filesize).
+			// Give a specific message instead of the misleading "no URL or file" error below.
+			$language = $this->getLanguage();
+			$message  = match ($file['error'])
+			{
+				UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
+					$language->text('PANOPTICON_EXTENSIONINSTALL_ERR_UPLOAD_TOO_LARGE'),
+				UPLOAD_ERR_PARTIAL =>
+					$language->text('PANOPTICON_EXTENSIONINSTALL_ERR_UPLOAD_PARTIAL'),
+				default =>
+					$language->sprintf('PANOPTICON_EXTENSIONINSTALL_ERR_UPLOAD_FAILED', $file['error']),
+			};
+
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=extensioninstall'),
+				$message,
+				'error'
+			);
+
+			return;
+		}
+
+		if (empty($url) && empty($filePath))
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=extensioninstall'),
+				$this->getLanguage()->text('PANOPTICON_EXTENSIONINSTALL_ERR_NO_URL_OR_FILE'),
+				'error'
+			);
+
+			return;
+		}
+
+		// Create the background task
+		$user   = $this->container->userManager->getUser();
+		$params = new Registry();
+		$params->set('sites', $siteIds);
+		$params->set('initiating_user', $user->getId());
+		$params->set('run_once', 'delete');
+
+		if (!empty($url))
+		{
+			$params->set('url', $url);
+		}
+
+		if (!empty($filePath))
+		{
+			$params->set('file', $filePath);
+		}
+
+		// Try to reuse an existing disabled extensioninstall task
+		/** @var \Akeeba\Panopticon\Model\Task $task */
+		$task = $this->container->mvcFactory->makeTempModel('Task');
+		$task->setState('type', 'extensioninstall');
+		$task->setState('enabled', 0);
+
+		$existing = $task->get(true, 0, 1);
+
+		if ($existing->count() > 0)
+		{
+			$task = $existing->first();
+		}
+		else
+		{
+			$task = $this->container->mvcFactory->makeTempModel('Task');
+			$task->site_id = null;
+			$task->type    = 'extensioninstall';
+		}
+
+		$task->params          = $params->toString();
+		$task->storage         = '{}';
+		$task->enabled         = 1;
+		$task->last_exit_code  = Status::INITIAL_SCHEDULE->value;
+		$task->locked          = null;
+		$task->priority        = 1;
+
+		// Schedule to run immediately
+		$tz   = $this->container->appConfig->get('timezone', 'UTC');
+		$then = $this->container->dateFactory('now', $tz);
+		$then->add(new \DateInterval('PT2S'));
+
+		$task->cron_expression = $then->minute . ' ' . $then->hour . ' '
+			. $then->day . ' ' . $then->month . ' ' . $then->dayofweek;
+		$task->last_execution  = (clone $then)->sub(new \DateInterval('PT1M'))->toSql();
+		$task->next_execution  = $then->toSql();
+
+		$task->setState('disable_next_execution_recalculation', 1);
+		$task->save();
+
+		// Clear session
+		$this->container->segment->set('extensioninstall.sites', null);
+
+		$this->setRedirect(
+			$this->container->router->route('index.php?view=main'),
+			$this->getLanguage()->text('PANOPTICON_EXTENSIONINSTALL_LBL_TASK_CREATED'),
+			'success'
+		);
+	}
+}

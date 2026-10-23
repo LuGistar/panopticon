@@ -1,0 +1,1162 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+namespace Akeeba\Panopticon\Model;
+
+use Akeeba\Panopticon\Exception\InvalidTaskType;
+use Akeeba\Panopticon\Helper\TaskUtils;
+use Akeeba\Panopticon\Library\Task\AbstractCallback;
+use Akeeba\Panopticon\Library\Task\CallbackInterface;
+use Akeeba\Panopticon\Library\Task\Status;
+use Akeeba\Panopticon\Library\Task\SymfonyStyleAwareInterface;
+use Awf\Container\Container;
+use Awf\Date\Date;
+use Awf\Mvc\DataModel;
+use Awf\Registry\Registry;
+use Cron\CronExpression;
+use DateInterval;
+use DateTimeZone;
+use Exception;
+use Psr\Log\LoggerAwareInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Symfony\Component\Console\Style\SymfonyStyle;
+use Throwable;
+
+defined('AKEEBA') || die;
+
+/**
+ * Handles the task queue
+ *
+ * @property int            $id              Task ID
+ * @property int            $site_id         The site the task belongs to, 0 = system task
+ * @property string         $type            Task type
+ * @property Registry       $params          Task parameters
+ * @property Registry       $storage         Transient data storage
+ * @property CronExpression $cron_expression The CRON expression for task execution
+ * @property bool           $enabled         Is it enabled?
+ * @property int            $last_exit_code  Last execution's exit code
+ * @property Date           $last_execution  Last execution started date and time (UTC)
+ * @property Date           $last_run_end    Last execution ended date and time (UTC)
+ * @property Date|null      $next_execution  Next execution date and time (UTC)
+ * @property int            $times_executed  How many times this task has executed
+ * @property int            $times_failed    How many times this task has failed
+ * @property Date|null      $locked          Date and time the task was locked
+ * @property int            $priority
+ * @property int            $stuck_retries   How many times cleanUpStuckTasks() has retried this task
+ *
+ * @noinspection PhpUnused
+ */
+class Task extends DataModel
+{
+	private const DB_LOCK_NAME = 'PanopticonNextTask';
+
+	private const DB_LOCK_TIMEOUT = 5;
+
+	/**
+	 * Maximum number of times {@see cleanUpStuckTasks()} will restore a stuck task to
+	 * Status::WILL_RESUME before giving up and either marking the current item failed (for
+	 * multi-item batches) or transitioning the task to Status::TIMEOUT.
+	 *
+	 * @var  int
+	 * @since 2.3.2
+	 */
+	private const MAX_STUCK_RETRIES = 3;
+
+	/**
+	 * Tracks whether we are currently holding the named DB lock from {@see self::DB_LOCK_NAME}.
+	 *
+	 * Set to true after a successful {@see lockTables()}, cleared by {@see unlockTables()}.
+	 * The shutdown handler {@see releaseLockOnShutdown()} consults this flag so it is a no-op
+	 * when the lock has already been released by the regular code path.
+	 *
+	 * @var  bool
+	 * @since 2.3.2
+	 */
+	private bool $lockHeld = false;
+
+	/**
+	 * Tracks whether {@see releaseLockOnShutdown()} has been registered. PHP's
+	 * register_shutdown_function is sticky across calls — register it at most once per request
+	 * to avoid stacking duplicate shutdown handlers when runNextTask() is invoked more than
+	 * once in the same process (e.g. inside a long-running loop).
+	 *
+	 * @var  bool
+	 * @since 2.3.2
+	 */
+	private bool $lockShutdownRegistered = false;
+
+	public function __construct(?Container $container = null)
+	{
+		$this->tableName   = '#__tasks';
+		$this->idFieldName = 'id';
+
+		parent::__construct($container);
+
+		$this->addBehaviour('filters');
+	}
+
+	public function buildQuery($overrideLimits = false)
+	{
+		/**
+		 * Workaround for filtering on site_id = 0.
+		 *
+		 * System tasks have a site_id = NULL. However, we cannot pass NULL as a query parameter. The closest thing is
+		 * either an empty string, or the value 0. An empty string in AWF means "no filter", therefor we use the value
+		 * 0. However, in this case, AWF will filter for value 0 which does not actually exist in our table. Therefore,
+		 * we need to do some sleight of hand.
+		 *
+		 * When we detect this condition we set the $filterSystemTask flag. When this flag is set, we do two things.
+		 *
+		 * First, we unset the site_id state variable before constructing the query. This bypasses AWF's filters, i.e.
+		 * AWF will not add a WHERE site_id = 0. This of course means that it does no filtering.
+		 *
+		 * Hence, the second part, after we construct the query. We add WHERE site_id IS NULL manually, and restore the
+		 * state variable back to '0', so that the interface will display the sites dropdown correctly. Ta-da!
+		 */
+		$filterSystemTask = $this->getState('site_id') === '0';
+
+		if ($filterSystemTask)
+		{
+			$this->setState('site_id', '');
+		}
+
+		$query = parent::buildQuery($overrideLimits);
+
+		// Part two of the sleight-of-hand explained above.
+		if ($filterSystemTask)
+		{
+			$query->where(
+				$query->quoteName('site_id') . ' IS NULL'
+			);
+
+			$this->setState('site_id', '0');
+		}
+
+		return $query;
+	}
+
+	/**
+	 * Return a stable serialised representation of this task for API consumption.
+	 *
+	 * @return  array
+	 * @since   1.4.0
+	 */
+	public function toApiArray(): array
+	{
+		return [
+			'id'              => (int) $this->id,
+			'site_id'         => $this->site_id === null ? null : (int) $this->site_id,
+			'type'            => $this->type,
+			'params'          => $this->getParams()->toArray(),
+			'storage'         => $this->getStorage()->toArray(),
+			'cron_expression' => (string) $this->cron_expression,
+			'enabled'         => (bool) $this->enabled,
+			'last_exit_code'  => $this->last_exit_code === null ? null : (int) $this->last_exit_code,
+			'last_execution'  => $this->last_execution,
+			'last_run_end'    => $this->last_run_end,
+			'next_execution'  => $this->next_execution,
+			'times_executed'  => (int) $this->times_executed,
+			'times_failed'    => (int) $this->times_failed,
+			'locked'          => $this->locked,
+			'priority'        => (int) $this->priority,
+		];
+	}
+
+	/**
+	 * Validate and save task data, sharing the same path between API and legacy UI.
+	 *
+	 * Throws RuntimeException with HTTP-style codes:
+	 *  - 422 / `task.unknown_type` for unknown task types
+	 *  - 422 / `task.invalid_cron` for invalid cron expressions
+	 *  - 400 for missing required fields
+	 *
+	 * @param   array  $data  Input data — at minimum `type` and `cron_expression` when creating.
+	 *
+	 * @return  void
+	 * @throws  \RuntimeException
+	 * @since   1.4.0
+	 */
+	public function validateAndSave(array $data): void
+	{
+		// Validate task type against the registry, if present in the payload.
+		if (array_key_exists('type', $data))
+		{
+			$type = (string) $data['type'];
+
+			if ($type === '')
+			{
+				throw new \RuntimeException('Missing required field: type', 400);
+			}
+
+			$known = false;
+
+			try
+			{
+				$known = $this->container->taskRegistry->has($type);
+			}
+			catch (Throwable)
+			{
+				$known = false;
+			}
+
+			if (!$known)
+			{
+				throw new \RuntimeException(
+					sprintf('Unknown task type "%s".', $type),
+					422
+				);
+			}
+		}
+
+		// Validate cron expression, if present.
+		if (array_key_exists('cron_expression', $data))
+		{
+			$cron = (string) $data['cron_expression'];
+
+			if ($cron === '')
+			{
+				throw new \RuntimeException('Missing required field: cron_expression', 400);
+			}
+
+			if (!CronExpression::isValidExpression($cron))
+			{
+				throw new \RuntimeException(
+					sprintf('Invalid cron expression "%s".', $cron),
+					422
+				);
+			}
+		}
+
+		// Coerce params / storage to Registry as the model expects.
+		if (array_key_exists('params', $data) && !$data['params'] instanceof Registry)
+		{
+			$data['params'] = new Registry($data['params'] ?? []);
+		}
+
+		if (array_key_exists('storage', $data) && !$data['storage'] instanceof Registry)
+		{
+			$data['storage'] = new Registry($data['storage'] ?? []);
+		}
+
+		if (array_key_exists('enabled', $data))
+		{
+			$data['enabled'] = (int) (bool) $data['enabled'];
+		}
+
+		$this->save($data);
+	}
+
+	public function getParams(): Registry
+	{
+		return $this->params instanceof Registry ? $this->params : new Registry($this->params);
+	}
+
+	public function getStorage(): Registry
+	{
+		return $this->storage instanceof Registry ? $this->storage : new Registry($this->storage);
+	}
+
+	/**
+	 * Get the duration of the last execution
+	 *
+	 * @return  string|null
+	 * @since   1.0.0
+	 */
+	public function getDuration(): ?string
+	{
+		// Some exit codes imply no duration
+		if (
+			in_array(
+				$this->last_exit_code,
+				[
+					Status::INITIAL_SCHEDULE->value,
+					Status::NO_ROUTINE->value,
+					Status::NO_LOCK->value,
+					Status::NO_RELEASE->value,
+					Status::NO_TASK->value,
+					Status::NO_RUN->value,
+				]
+			)
+		)
+		{
+			return null;
+		}
+
+		// We need to have valid execution start/stop timestamps.
+		if (
+			empty($this->last_execution) || empty($this->last_run_end) || $this->last_execution == '0000-00-00 00:00:00'
+			|| $this->last_run_end == '0000-00-00 00:00:00'
+			|| $this->last_execution == '2000-01-01 00:00:00'
+			|| $this->last_run_end == '2000-01-01 00:00:00'
+		)
+		{
+			return null;
+		}
+
+		try
+		{
+			$utcTimeZone = new DateTimeZone('UTC');
+			$startTime = clone $this->container->dateFactory($this->last_execution, $utcTimeZone);
+			$endTime   = clone $this->container->dateFactory($this->last_run_end, $utcTimeZone);
+			$duration  = abs($endTime->toUnix() - $startTime->toUnix());
+		}
+		catch (Throwable)
+		{
+			$duration = 0;
+		}
+
+		$seconds  = $duration % 60;
+		$duration -= $seconds;
+
+		$minutes  = ($duration % 3600) / 60;
+		$duration -= $minutes * 60;
+
+		$hours = $duration / 3600;
+
+		return sprintf('%02d', $hours) . ':' .
+		       sprintf('%02d', $minutes) . ':' .
+		       sprintf('%02d', $seconds);
+
+	}
+
+	public function check(): self
+	{
+		parent::check();
+
+		// Check the cron_expression for validity
+		if (!CronExpression::isValidExpression($this->cron_expression))
+		{
+			new CronExpression($this->cron_expression);
+		}
+
+		// I always need to set the next run when I am saving a task.
+		try
+		{
+			try
+			{
+				$tz = $this->container->appConfig->get('timezone', 'UTC');
+
+				// Do not remove. This tests the validity of the configured timezone.
+				new DateTimeZone($tz);
+			}
+			catch (Exception)
+			{
+				$tz = 'UTC';
+			}
+
+			$cron_expression = $this->cron_expression instanceof CronExpression
+				? $this->cron_expression
+				: new CronExpression($this->cron_expression);
+
+			// Warning! The last execution time is ALWAYS stored in UTC
+			try
+			{
+				$realTimeAsDateObject = $this->container->dateFactory($this->last_execution ?: 'now', 'UTC');
+			}
+			catch (Throwable)
+			{
+				$realTimeAsDateObject = $this->container->dateFactory('now', 'UTC');
+			}
+
+			$relativeTime = $realTimeAsDateObject->format('Y-m-d\TH:i:sP', false, false);
+
+			// The call to getNextRunDate must use our local timezone because the CRON expression is in local time
+			$nextRun = $cron_expression->getNextRunDate($relativeTime, timeZone: $tz)->format(DATE_W3C);
+
+			/**
+			 * If the disable_next_execution_recalculation state is set to true we'll NOT override next_execution.
+			 *
+			 * This is used when scheduling tasks for the current date and time, having them run as soon as possible.
+			 *
+			 * For tasks returning Status::WILL_RESUME we deliberately do not resolve the CRON expression either. The
+			 * controller pins all five CRON fields to the creation moment (e.g. `30 14 5 8 2`) to make a one-shot
+			 * "run immediately" task. On the next save, getNextRunDate() resolves the NEXT occurrence matching all
+			 * five fields which, with dayofweek fixed to one weekday, lands ~1 week out — stranding an in-progress
+			 * batch. Setting next_execution to "now + 2 seconds" directly avoids the bad recalc against the narrow,
+			 * pinned CRON expression without bypassing the standard scheduler path. WILL_RESUME tasks resume on the
+			 * next cron tick (~1 minute for the --loop daemon).
+			 */
+			if (!$this->getState('disable_next_execution_recalculation', false, 'bool'))
+			{
+				if ($this->last_exit_code === Status::WILL_RESUME->value)
+				{
+					$this->next_execution = $this->container->dateFactory('now + 2 seconds', 'UTC')->toSql();
+				}
+				else
+				{
+					try
+					{
+						$nextExecDatetime = $this->container->dateFactory($nextRun, 'UTC');
+					}
+					catch (Throwable)
+					{
+						$nextExecDatetime = $this->container->dateFactory('now', 'UTC');
+					}
+
+					$this->next_execution = $nextExecDatetime->toSql();
+				}
+			}
+		}
+		catch (Exception)
+		{
+			// Nothing to do
+		}
+
+		// If this is a brand new CRON job describe it appropriately.
+		if ($this->next_execution === null || $this->next_execution === '2000-01-01 00:00:00')
+		{
+			$this->last_run_end   = null;
+			$this->last_exit_code = Status::INITIAL_SCHEDULE->value;
+		}
+
+		return $this;
+	}
+
+	public function runNextTask(?LoggerInterface $logger = null, ?SymfonyStyle $ioStyle = null): bool
+	{
+		$logger ??= new NullLogger();
+
+		@ob_start();
+
+		$logger->info('Locking task tables');
+
+		// Lock the table to avoid concurrency issues
+		if (!$this->lockTables($logger))
+		{
+			return false;
+		}
+
+		// Cancel any tasks which appear to be stuck
+		try
+		{
+			$logger->info('Cleaning up stuck tasks');
+
+			$this->cleanUpStuckTasks();
+
+			// NB: Do NOT release the named DB lock here. We must keep the lock held through
+			// getNextTask() and the mark-as-running save below. Releasing it here allows two
+			// concurrent processes to grab the same WILL_RESUME row, both attempt the
+			// mark-as-running save, and trip AWF's optimistic-locking "Record has changed
+			// since last read" or a real MySQL deadlock. The lock is released after the
+			// mark-as-running save completes (or its fallback path runs).
+		}
+		catch (Throwable $e)
+		{
+			$logger->error(
+				sprintf(
+					'Failed to clean up stuck tasks [%s:%d]: %s',
+					$e->getFile(),
+					$e->getLine(),
+					$e->getMessage()
+				)
+			);
+
+			// If an error occurred it means that a past lock has not yet been freed; give up.
+			$this->unlockTables();
+
+			@ob_end_clean();
+
+			return false;
+		}
+
+		// Get the next pending task
+		try
+		{
+			$logger->info('Getting next task');
+
+			/**
+			 * MAGIC. DO NOT TOUCH.
+			 *
+			 * If you have multiple processes trying to get a lock at precisely the same time (down to a few hundreds of
+			 * nanoseconds) MySQL will happily acquire the lock for EACH. AND. EVERY. ONE. OF. THEM! This, of course, is
+			 * really bloody useless as it beats the entire point of having a lock. Adding a random sleep between 25 and
+			 * 100 msec we “unsync” the various threads enough so that MySQL can get its ducks in a row and apply locks
+			 * they way its documentation claims it does.
+			 *
+			 * Almost six hours of debugging comes down to “wait for a random amount of time”. For fuck's sake…
+			 */
+			usleep(random_int(25000, 100000));
+
+			$pendingTask = $this->getNextTask();
+
+			if (empty($pendingTask))
+			{
+				$logger->info('There are no pending tasks.');
+
+				$this->unlockTables();
+
+				return false;
+			}
+		}
+		catch (Exception $e)
+		{
+			$logger->error(
+				sprintf(
+					'Task retrieval failed %s:%d: %s',
+					$e->getFile(),
+					$e->getLine(),
+					$e->getMessage()
+				)
+			);
+
+			$this->unlockTables();
+
+			@ob_end_clean();
+
+			return false;
+		}
+
+		// Log the task (System Task)
+		if ($pendingTask->site_id == 0)
+		{
+			$logger->info(
+				sprintf(
+					'System Task #%d - “%s”',
+					$pendingTask->id,
+					TaskUtils::getTaskDescription($pendingTask->type)
+				),
+				$pendingTask->getData()
+			);
+		}
+		// Log the task (Site Task)
+		else
+		{
+			$logger->info(
+				sprintf(
+					'Site Task #%d - “%s” for site #%d (%s)',
+					$pendingTask->id,
+					TaskUtils::getTaskDescription($pendingTask->type),
+					$pendingTask->site_id,
+					TaskUtils::getSiteName($pendingTask->site_id)
+				),
+				$pendingTask->getData()
+			);
+		}
+
+		// Mark the current task as running
+		$priorExitCode = $pendingTask->last_exit_code;
+
+		// Suppress the CRON recalculation in Task::check() for this save. Without this the
+		// narrow, controller-pinned one-shot CRON expression would be re-resolved against the
+		// current time and (per gh-1060 cause 1) strand the in-progress batch ~1 week out if
+		// the process dies between this save and the bookkeeping save 2 lines below.
+		$pendingTask->setState('disable_next_execution_recalculation', true);
+
+		try
+		{
+			$willResume = $priorExitCode == Status::WILL_RESUME->value;
+
+			$updates = [
+				'last_exit_code' => Status::RUNNING->value,
+			];
+
+			/**
+			 * Update the last execution time only when we are not resuming the task. Otherwise, the time spent on the
+			 * task will always be wrong as it will be measured from the beginning of its last step, not the very start
+			 * of the task itself.
+			 */
+			if (!$willResume)
+			{
+				$updates['last_execution'] = $this->container->dateFactory('now', 'UTC')->toSql();
+			}
+
+			$this->saveMarkAsRunning($pendingTask, $updates);
+		}
+		catch (Exception)
+		{
+			$logger->error('Failed to update task execution information', $pendingTask->getData());
+
+			// Failure to save the task means that the task execution has ultimately failed.
+			try
+			{
+				$pendingTask->save(
+					[
+						'last_exit_code' => (int) $priorExitCode === Status::WILL_RESUME->value
+							? Status::WILL_RESUME->value
+							: Status::NO_LOCK->value,
+						'last_execution' => $this->container->dateFactory('now', 'UTC')->toSql(),
+					]
+				);
+			}
+			catch (Exception)
+			{
+				// If that fails to, man, I don't know! Your database died or something?
+			}
+
+			$this->unlockTables();
+
+			@ob_end_clean();
+
+			return true;
+		}
+		finally
+		{
+			// Restore the state so the bookkeeping save 2 lines below can recompute next_execution
+			// against the (now broader) callback-derived status. If the process dies after this
+			// finally but before the bookkeeping save, next_execution is left at the previous
+			// value — which is the pre-existing behaviour we are not changing here.
+			$pendingTask->setState('disable_next_execution_recalculation', false);
+		}
+
+		try
+		{
+			$logger->debug('Unlocking tables');
+
+			$this->unlockTables();
+		}
+		catch (Exception)
+		{
+			// This should not fail; but if it does, we can survive it.
+		}
+
+		// Catch the user abort signal, in case we are executed over the web (not ideal...)
+		if (function_exists('ignore_user_abort'))
+		{
+			ignore_user_abort(true);
+		}
+
+		// Install a PHP timeout trap
+		register_shutdown_function([$this, 'timeoutTrap'], $pendingTask);
+
+		try
+		{
+			/** @var CallbackInterface $callback */
+			$callback = $this->container->taskRegistry->get($pendingTask->type);
+
+			if (function_exists('user_decorate_task'))
+			{
+				$callback = user_decorate_task($pendingTask->type, $callback);
+			}
+
+			if (!$callback instanceof CallbackInterface)
+			{
+				throw new InvalidTaskType;
+			}
+
+			if ($callback instanceof LoggerAwareInterface && !($callback instanceof AbstractCallback))
+			{
+				$callback->setLogger($logger);
+			}
+
+			if ($callback instanceof SymfonyStyleAwareInterface && !empty($ioStyle))
+			{
+				$callback->setSymfonyStyle($ioStyle);
+			}
+
+			$taskObject = (object) $pendingTask->toArray();
+			$storage    = $pendingTask->storage;
+
+			if (!is_object($storage))
+			{
+				$pendingTask->storage = new Registry($storage);
+				$storage              = $pendingTask->storage;
+			}
+
+			$storage->set('task.resumed', $willResume);
+
+			$logger->debug(
+				$willResume
+					? 'Resuming task'
+					: 'Executing task'
+			);
+
+			$return = $callback($taskObject, $storage);
+
+			$storage->set('task.resumed', null);
+
+			// Only advance the execution counter if we're not resuming a task.
+			if (!$willResume)
+			{
+				$pendingTask->times_executed++;
+			}
+
+			if (empty($return) && $return !== 0)
+			{
+				$logger->notice('Task finished without an exit status');
+
+				$pendingTask->last_exit_code = Status::NO_EXIT->value;
+			}
+			elseif (!is_numeric($return))
+			{
+				$logger->notice('Task finished with an invalid exit value type');
+
+				$pendingTask->last_exit_code = Status::INVALID_EXIT->value;
+			}
+			else
+			{
+				$pendingTask->last_exit_code = Status::tryFrom($return)?->value ?? Status::INVALID_EXIT->value;
+			}
+
+			if ($pendingTask->last_exit_code === Status::INVALID_EXIT->value)
+			{
+				$logger->notice('Task finished with an invalid exit value');
+			}
+			else
+			{
+				$logger->info(
+					sprintf(
+						'Task finished with status “%s”', Status::tryFrom($pendingTask->last_exit_code)->forHumans()
+					)
+				);
+			}
+
+			$pendingTask->storage = $pendingTask->last_exit_code !== Status::WILL_RESUME->value
+				? '{}'
+				: $storage->toString();
+		}
+		catch (InvalidTaskType)
+		{
+			$logger->error(sprintf('Unknown Task type ‘%s’', $pendingTask->type));
+
+			$pendingTask->last_exit_code = Status::NO_ROUTINE->value;
+			$pendingTask->storage        = '{}';
+			$pendingTask->times_failed++;
+		}
+		catch (Throwable $e)
+		{
+			$logger->error(
+				sprintf(
+					'Task failed with exception type %s [%s:%d]: %s',
+					$e::class,
+					$e->getFile(),
+					$e->getLine(),
+					$e->getMessage()
+				)
+			);
+
+			$pendingTask->last_exit_code = Status::EXCEPTION->value;
+			$pendingTask->storage        = json_encode(
+				[
+					'error' => $e->getMessage(),
+					'trace' => $e->getFile() . '::' . $e->getLine() . "\n" . $e->getTraceAsString(),
+				]
+			);
+			$pendingTask->times_failed++;
+		}
+		finally
+		{
+			$params        = is_object($pendingTask->params)
+				? $pendingTask->params
+				: new Registry(
+					$pendingTask->params
+				);
+			$isInvalidTask = $pendingTask->last_exit_code === Status::NO_ROUTINE->value;
+			$isError       = $pendingTask->last_exit_code === Status::EXCEPTION->value;
+			$isResumable   = $pendingTask->last_exit_code === Status::WILL_RESUME->value;
+			$runOnceAction = $params->get('run_once', null);
+
+			if (($runOnceAction === 'disable') && !$isError && !$isInvalidTask && !$isResumable)
+			{
+				$logger->debug('Run Once task: action set to disable; disabling task');
+
+				$pendingTask->enabled = 0;
+			}
+
+			if (!empty($runOnceAction) && ($isError || $isInvalidTask))
+			{
+				if ($isError)
+				{
+					$logger->debug('Run Once task: finished with error; disabling task');
+				}
+				elseif ($isInvalidTask)
+				{
+					$logger->debug('Run Once task: invalid task type; disabling task');
+				}
+
+				$pendingTask->enabled = 0;
+			}
+
+			// A callback may have persisted param changes (e.g. dedup identifiers) through its own model
+			// instance. Refresh params from the database so the bookkeeping save() below does not clobber
+			// them with our stale, load-time in-memory copy. This is behaviour-neutral for callbacks that
+			// did not touch params: the refreshed value equals the value we already hold.
+			try
+			{
+				$db          = $this->getDbo();
+				$freshParams = $db->setQuery(
+					$db->getQuery(true)
+						->select($db->quoteName('params'))
+						->from($db->quoteName($this->tableName))
+						->where($db->quoteName($this->idFieldName) . ' = ' . (int) $pendingTask->getId())
+				)->loadResult();
+
+				if ($freshParams !== null)
+				{
+					$pendingTask->params = $freshParams;
+				}
+			}
+			catch (Throwable)
+			{
+				// If the refresh fails, fall back to the in-memory value.
+			}
+
+			$logger->debug('Updating the task\'s last execution information');
+
+			$priorExitCode = $pendingTask->last_exit_code;
+
+			try
+			{
+				$this->lockTables();
+				$this->saveLastRunEnd($pendingTask);
+				$this->unlockTables();
+			}
+			catch (Exception)
+			{
+				$logger->error('Failed to update the task\'s last execution information');
+
+				$pendingTask->save(
+					[
+						'last_run_end'   => $this->container->dateFactory('now', 'UTC')->toSql(),
+						'last_exit_code' => (int) $priorExitCode === Status::WILL_RESUME->value
+							? Status::WILL_RESUME->value
+							: Status::NO_RELEASE->value,
+					]
+				);
+			}
+
+			if (($runOnceAction === 'delete') && !$isError && !$isInvalidTask && !$isResumable)
+			{
+				$logger->debug('Run Once task: action set to delete; deleting task');
+
+				try
+				{
+					$pendingTask->delete();
+				}
+				catch (Exception)
+				{
+					// Don't worry about it.
+				}
+			}
+
+			@ob_end_clean();
+
+			return true;
+		}
+	}
+
+	public function cleanUpStuckTasks(): void
+	{
+		$db         = $this->getDbo();
+		$threshold  = max(3, (int) $this->container->appConfig->get('cron_stuck_threshold', 3));
+		$cutoffTime = $this->container->dateFactory('now', 'UTC')
+			->sub(new DateInterval('PT' . $threshold . 'M'));
+
+		// Select stuck tasks. We use COALESCE(last_run_end, last_execution) so a healthy
+		// WILL_RESUME pickup (which deliberately does NOT update last_execution — see the
+		// comment block at runNextTask() ~lines 519-538) is not falsely flagged as stuck.
+		$stuckRows = $db->setQuery(
+			$db->getQuery(true)
+				->select('*')
+				->from($db->quoteName($this->tableName))
+				->where($db->quoteName('last_exit_code') . ' = ' . Status::RUNNING->value)
+				->andWhere(
+					'COALESCE(' . $db->quoteName('last_run_end') . ', ' . $db->quoteName('last_execution') . ') <= '
+					. $db->quote($cutoffTime->toSql())
+				)
+		)->loadObjectList();
+
+		if (empty($stuckRows))
+		{
+			return;
+		}
+
+		foreach ($stuckRows as $row)
+		{
+			$task      = $this->getClone()->bind($row);
+			$storage   = $task->getStorage();
+			$retries   = (int) ($row->stuck_retries ?? 0);
+			$nowSql    = $this->container->dateFactory('now', 'UTC')->toSql();
+
+			// Retry budget not yet exhausted: restore the task to WILL_RESUME so it is picked up
+			// on the next getNextTask() cycle (which orders WILL_RESUME first per cause 5). We
+			// preserve the existing storage so progress within the batch is retained.
+			if ($retries < self::MAX_STUCK_RETRIES)
+			{
+				$task->save(
+					[
+						'last_exit_code' => Status::WILL_RESUME->value,
+						'last_run_end'   => $nowSql,
+						'stuck_retries'  => $retries + 1,
+					]
+				);
+
+				continue;
+			}
+
+			// Retry budget exhausted. If the storage looks like a multi-item batch, mark just
+			// the current item as failed and advance the index instead of discarding the whole
+			// run. Otherwise fall back to the original TIMEOUT / null-storage behaviour.
+			$params       = $task->getParams();
+			$sites        = (array) $params->get('sites', []);
+			$currentIndex = (int) $storage->get('currentIndex', 0);
+			$results      = (array) $storage->get('results', []);
+
+			if (!empty($sites) && $currentIndex < count($sites))
+			{
+				$failedSiteId        = (int) $sites[$currentIndex];
+				$results[$failedSiteId] = [
+					'site_name' => 'Unknown (ID: ' . $failedSiteId . ')',
+					'status'    => 'failed',
+					'message'   => sprintf(
+						'Marked failed after %d stuck retries',
+						self::MAX_STUCK_RETRIES
+					),
+				];
+
+				$newIndex     = $currentIndex + 1;
+				$done         = $newIndex >= count($sites);
+				$storage->set('results', $results);
+				$storage->set('currentIndex', $newIndex);
+
+				// Assign storage directly. AWF's DataModel::bind() uses isset(), which treats a
+				// null entry as missing, so we cannot pass null in the bind array. Direct
+				// assignment updates $this->recordData and save() will then persist NULL.
+				$task->storage = $done ? null : $storage->toString();
+				$task->save(
+					[
+						'last_exit_code' => $done
+							? Status::TIMEOUT->value
+							: Status::WILL_RESUME->value,
+						'last_run_end'   => $nowSql,
+					]
+				);
+
+				continue;
+			}
+
+			// Not a multi-item batch (or all sites already processed): the original TIMEOUT
+			// behaviour — wipe the storage so the next attempt starts from scratch.
+			// Direct assignment is required; see the comment above on AWF's bind() behaviour.
+			$task->storage = null;
+			$task->save(
+				[
+					'last_exit_code' => Status::TIMEOUT->value,
+					'last_run_end'   => $nowSql,
+				]
+			);
+		}
+	}
+
+	public function timeoutTrap(self $pendingTask): void
+	{
+		// The request has timed out. Whomp, whomp.
+		if (in_array(connection_status(), [2, 3]))
+		{
+			$pendingTask->save(
+				[
+					'last_exit_code' => Status::TIMEOUT->value,
+					'storage'        => null,
+				]
+			);
+
+			exit(127);
+		}
+	}
+
+	public function getGroupsForSelect(): array
+	{
+		$db    = $this->getDbo();
+		$query = $db
+			->getQuery(true)
+			->select(
+				[
+					$db->quoteName('id'),
+					$db->quoteName('title'),
+				]
+			)
+			->from($db->quoteName('#__groups'));
+
+		return array_map(fn($x) => $x->title, $db->setQuery($query)->loadObjectList('id') ?: []);
+	}
+
+	private function getNextTask(): ?self
+	{
+		$db = $this->getDbo();
+
+		$query = $db->getQuery(true)
+			->select('*')
+			->from($db->quoteName($this->tableName))
+			->where($db->quoteName('enabled') . ' = 1')
+			->andWhere(
+				[
+					$db->quoteName('last_exit_code') . ' = ' . Status::WILL_RESUME->value,
+					// -OR-
+					'(' .
+					$db->quoteName('last_exit_code') . ' != ' . Status::WILL_RESUME->value .
+					' AND ' .
+					$db->quoteName('last_exit_code') . ' != ' . Status::RUNNING->value .
+					' AND ' .
+					$db->quoteName('next_execution') . ' <= ' . $db->quote(
+						$this->container->dateFactory('now', 'UTC')->toSql()
+					) .
+					')',
+				]
+			)
+			->order(
+				// WILL_RESUME tasks must run before anything else regardless of priority. Without
+				// the leading CASE expression, a `priority = 1` WILL_RESUME task (e.g. an
+				// extensioninstall in progress) is perpetually queued behind routine `priority = 0`
+				// tasks created by the per-minute CRON — starving the in-progress batch. The
+				// `last_exit_code DESC` previously in this ORDER BY is subsumed by the CASE and
+				// has been removed.
+				'(CASE WHEN ' . $db->quoteName('last_exit_code') . ' = ' . Status::WILL_RESUME->value
+				. ' THEN 0 ELSE 1 END) ASC, ' .
+				$db->quoteName('priority') . ' ASC, ' .
+				$db->quoteName('next_execution') . ' ASC'
+			);
+
+		$task = $db->setQuery($query, 0, 1)->loadObject();
+
+		if (empty($task))
+		{
+			return null;
+		}
+
+		return $this->getClone()->bind($task);
+	}
+
+	private function lockTables(?LoggerInterface $logger = null, bool $unlockFirst = false)
+	{
+		$logger ??= new NullLogger();
+		$db     = $this->getDbo();
+
+		if ($unlockFirst)
+		{
+			$this->unlockTables();
+		}
+
+		$gotLock = $db->setQuery(
+			'SELECT GET_LOCK(' . $db->quote(self::DB_LOCK_NAME) . ', ' . self::DB_LOCK_TIMEOUT . ')'
+		)->loadResult();
+
+		if ($gotLock == 1)
+		{
+			$connId = $db->setQuery('SELECT CONNECTION_ID()')->loadResult();
+
+			$logger->debug(
+				sprintf(
+					'Got tasks lock [%d]', $connId
+				)
+			);
+
+			$this->lockHeld = true;
+
+			// Register a shutdown handler so the named lock is released even on fatal errors,
+			// SIGTERM, or other exits that bypass the regular unlockTables() call sites. The
+			// handler is idempotent (it checks the lockHeld flag) and registered at most once
+			// per process; subsequent lockTables() calls within the same request do not stack
+			// duplicate shutdown handlers.
+			if (!$this->lockShutdownRegistered)
+			{
+				register_shutdown_function([$this, 'releaseLockOnShutdown']);
+				$this->lockShutdownRegistered = true;
+			}
+
+			return true;
+		}
+
+		$logger->notice('Could not obtain tasks lock');
+
+		return false;
+	}
+
+	private function unlockTables()
+	{
+		$db = $this->getDbo();
+
+		while (true)
+		{
+			$result = $db->setQuery(
+				'SELECT RELEASE_LOCK(' . $db->quote(self::DB_LOCK_NAME) . ')'
+			)->loadResult();
+
+			if ($result !== 1)
+			{
+				break;
+			}
+		}
+
+		$this->lockHeld = false;
+	}
+
+	/**
+	 * Shutdown handler registered by {@see lockTables()} that releases the named DB lock if it
+	 * is still held when PHP shuts down.
+	 *
+	 * Without this trap, a fatal error, SIGTERM, or PHP timeout between the lock acquisition
+	 * and the explicit unlockTables() call would leave the lock orphaned until the underlying
+	 * DB connection's GET_LOCK timeout expires — during which time no other process can run
+	 * tasks.
+	 *
+	 * Idempotent: it only acts when {@see $lockHeld} is true. This means the regular
+	 * unlockTables() call sites are unaffected and we can register the handler once per
+	 * process without stacking duplicates across multiple runNextTask() invocations.
+	 *
+	 * @return  void
+	 * @since   2.3.2
+	 */
+	public function releaseLockOnShutdown(): void
+	{
+		if (!$this->lockHeld)
+		{
+			return;
+		}
+
+		try
+		{
+			$this->unlockTables();
+		}
+		catch (Throwable)
+		{
+			// The DB connection is likely already gone during a fatal shutdown. Swallow any
+			// failure rather than throwing from the shutdown handler (which would be ignored
+			// anyway and would prevent any other registered handlers from running).
+		}
+	}
+
+	/**
+	 * Persist the "mark as running" state transition for $pendingTask.
+	 *
+	 * Extracted from {@see runNextTask()} so that integration tests can override it to simulate
+	 * a save failure (and therefore drive the fallback path that preserves Status::WILL_RESUME).
+	 *
+	 * @param   Task    $pendingTask  The task being marked as running.
+	 * @param   array   $updates      The fields being written by the mark-as-running save.
+	 *
+	 * @return  void
+	 * @throws  \Exception  Propagates any save failure to the caller.
+	 *
+	 * @since   2.3.2
+	 */
+	protected function saveMarkAsRunning(self $pendingTask, array $updates): void
+	{
+		$pendingTask->save($updates);
+	}
+
+	/**
+	 * Persist the bookkeeping `last_run_end` timestamp for $pendingTask.
+	 *
+	 * Extracted from {@see runNextTask()} so that integration tests can override it to simulate
+	 * a save failure (and therefore drive the fallback path that preserves Status::WILL_RESUME).
+	 *
+	 * @param   Task  $pendingTask  The task whose last_run_end is being recorded.
+	 *
+	 * @return  void
+	 * @throws  \Exception  Propagates any save failure to the caller.
+	 *
+	 * @since   2.3.2
+	 */
+	protected function saveLastRunEnd(self $pendingTask): void
+	{
+		$pendingTask->save(
+			[
+				'last_run_end' => $this->container->dateFactory('now', 'UTC')->toSql(),
+			]
+		);
+	}
+}

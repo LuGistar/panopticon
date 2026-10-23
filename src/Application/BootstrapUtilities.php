@@ -1,0 +1,733 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+namespace Akeeba\Panopticon\Application;
+
+use AConfig;
+use Akeeba\Panopticon\Factory;
+use Akeeba\Panopticon\Library\User\User;
+use Akeeba\Panopticon\Model\Loginfailures;
+use Awf\Registry\Registry;
+use Awf\Utils\Ip;
+use Composer\CaBundle\CaBundle;
+use Dotenv\Dotenv;
+use ReflectionException;
+use ReflectionObject;
+use Symfony\Component\ErrorHandler\ErrorHandler;
+use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
+use Throwable;
+
+defined('AKEEBA') || die;
+
+/**
+ * Common code for the application bootstrapping process.
+ *
+ * This code used to live in whole inside bootstrap.php. Putting it in a final class allows us to keep it more tidy, and
+ * prevent all unnecessary variable pollution of the root namespace.
+ *
+ * @since  1.0.3
+ */
+final class BootstrapUtilities
+{
+	/**
+	 * Used to keep the tmp_file() of the combined CA file in scope until the end of the request.
+	 *
+	 * @var   false|resource
+	 * @since 1.0.3
+	 */
+	static $tempCaCert = false;
+
+	private static $secret = null;
+
+	/**
+	 * Is the secret in self::$secret different on every request, because tmp/secret.php could not be written?
+	 *
+	 * @var   bool
+	 * @since 2.4.0
+	 */
+	private static bool $secretIsVolatile = false;
+
+	/**
+	 * Asserts that the server meets the minimum PHP version requirement
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function assertMinimumPHPVersion(): void
+	{
+		// version.php does not exist on a fresh Git checkout; fall back to the minimum version from defines.php.
+		$minPHPVersion = defined('AKEEBA_PANOPTICON_MINPHP')
+			? AKEEBA_PANOPTICON_MINPHP
+			: AKEEBA_PANOPTICON_MINPHP_FALLBACK;
+
+		if (!version_compare(PHP_VERSION, $minPHPVersion, 'lt'))
+		{
+			return;
+		}
+
+		if (defined('AKEEBA_PANOPTICON_CLI') || !@is_file(APATH_THEMES . '/system/incompatible.html'))
+		{
+			echo sprintf(
+				"Akeeba Panopticon requires PHP %s or later. Your server is using PHP %s." . PHP_EOL,
+				$minPHPVersion, PHP_VERSION
+			);
+
+			exit(254);
+		}
+
+		die(
+		str_replace(
+			['{{minphpversion}}', '{{phpversion}}'], [$minPHPVersion, PHP_VERSION],
+			file_get_contents(APATH_THEMES . '/system/incompatible.html')
+		)
+		);
+
+	}
+
+	/**
+	 * Asserts that we are not running under HHVM.
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function assertNotHHVM(): void
+	{
+		if (!defined('HHVM_VERSION'))
+		{
+			return;
+		}
+
+		if (defined('AKEEBA_PANOPTICON_CLI') || !@is_file(APATH_THEMES . '/system/hhvm.html'))
+		{
+			echo "Akeeba Panopticon is not compatible with HHVM. Please use PHP proper." . PHP_EOL;
+
+			exit(254);
+		}
+
+		die(file_get_contents(APATH_THEMES . '/system/hhvm.html'));
+	}
+
+	/**
+	 * Asserts that the Composer dependencies have been installed
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function assertComposerInstalled(): void
+	{
+		if (file_exists(APATH_ROOT . '/vendor/autoload.php') && @is_file(APATH_THEMES . '/system/incomplete.html'))
+		{
+			return;
+		}
+
+		if (defined('AKEEBA_PANOPTICON_CLI'))
+		{
+			echo "Akeeba Panopticon has not been installed correctly." . PHP_EOL;
+
+			exit(254);
+		}
+
+		die(file_get_contents(APATH_THEMES . '/system/incomplete.html'));
+	}
+
+	/**
+	 * Apply our customised Symfony error handler as the default exceptions handler
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function applyExceptionsHandler(): void
+	{
+		// Override Symfony's error handler
+		BootstrapUtilities::overrideHtmlErrorRenderer();
+
+		// Create an error handler
+		$errorHandler = ErrorHandler::register();
+
+		// Set our custom error handler theme
+		HtmlErrorRenderer::setTemplate(APATH_THEMES . '/system/fatal.php');
+
+		// Don't throw for trivial warnings and notices
+		$errorHandler->throwAt(0, true);
+
+		/**
+		 * Set up maximum error handling in the following conditions:
+		 *
+		 * - No configuration file is present (initial setup)
+		 * - The AKEEBADEBUG constant is set and is true
+		 * - The debug configuration option is enabled
+		 * - The error_reporting configuration option is set to `maximum`
+		 */
+		if (
+			!self::hasConfiguration()
+			|| (defined('AKEEBADEBUG') && constant('AKEEBADEBUG'))
+			|| self::getInitialConfiguration()->get('debug', false)
+			|| self::getInitialConfiguration()->get('error_reporting', 'default') !== 'maximum'
+		)
+		{
+			$errorHandler->setExceptionHandler(
+				[
+					new ErrorHandler(null, true),
+					'renderException',
+				]
+			);
+		}
+	}
+
+	/**
+	 * Do we have any valid application configuration file?
+	 *
+	 * @param   bool  $dotEnvOnly  Should I only consider .env files?
+	 *
+	 * @return  bool
+	 * @since   1.0.3
+	 */
+	public static function hasConfiguration(bool $dotEnvOnly = false): bool
+	{
+		// Special case: I am containerised, and PANOPTICON_USING_ENV is 1
+		if (defined('APATH_IN_DOCKER') && constant('APATH_IN_DOCKER') && ($_ENV['PANOPTICON_USING_ENV'] ?? 0))
+		{
+			return true;
+		}
+
+		$environment = $_SERVER['PANOPTICON_ENVIRONMENT'] ?? $_ENV['PANOPTICON_ENVIRONMENT'] ?? 'production';
+
+		$filePaths = [
+			APATH_CONFIGURATION . '/config.php',
+			APATH_CONFIGURATION . '/.env',
+			APATH_CONFIGURATION . '/.env.' . $environment,
+			APATH_USER_CODE . '/.env',
+			APATH_USER_CODE . '/.env.' . $environment,
+		];
+
+		if ($dotEnvOnly)
+		{
+			$filePaths = array_slice($filePaths, 1);
+		}
+
+		return array_reduce(
+			$filePaths,
+			fn(bool $carry, string $filePath) => $carry || (file_exists($filePath) && is_readable($filePath)), false
+		);
+	}
+
+	/**
+	 * Apply the error_reporting configuration preference to PHP itself.
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function applyErrorReportingToPHP(): void
+	{
+		// Load the configuration; we'll need it to set up error reporting and handling
+		$config = self::getInitialConfiguration();
+
+		// Set the PHP error reporting
+		switch ($config->get('error_reporting', 'default'))
+		{
+			default:
+				break;
+
+			case 'none':
+				error_reporting(0);
+				ini_set('display_errors', 0);
+
+				break;
+
+			case 'simple':
+				error_reporting(E_ERROR | E_WARNING | E_PARSE | E_USER_ERROR | E_USER_WARNING);
+				ini_set('display_errors', 1);
+
+				break;
+
+			case 'maximum':
+				error_reporting(E_ALL);
+				ini_set('display_errors', 1);
+
+				break;
+		}
+	}
+
+	/**
+	 * Apply the Debug preference as a PHP constant (if not already defined)
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function applyDebugToConstant(): void
+	{
+		// Load the configuration; we'll need it to set up error reporting and handling
+		$config = self::getInitialConfiguration();
+
+		// Do we need to set up a more detailed error handler?
+		if (!defined('AKEEBADEBUG'))
+		{
+			define('AKEEBADEBUG', $config->get('debug', false));
+		}
+	}
+
+	/**
+	 * Apply the Behind Load Balancer preference to AWF's Ip helper
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function applyLoadBalancerConfiguration(): void
+	{
+		Ip::setAllowIpOverrides(self::getInitialConfiguration()->get('behind_load_balancer', false));
+	}
+
+	/**
+	 * Apply a custom CA file.
+	 *
+	 * If the user has not provided a custom file we just use the cacert.pem provided by Composer.
+	 *
+	 * Otherwise, we combine the user– and the Composer–provided files in a temporary file which is kept in scope
+	 * throughout the request.
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function applyCustomCAFile(): void
+	{
+		if (defined('AKEEBA_CACERT_PEM'))
+		{
+			return;
+		}
+
+		$defaultCacertPath  = CaBundle::getBundledCaBundlePath();
+		$customFile         = APATH_USER_CODE . '/cacert.pem';
+		$customFileContents = (file_exists($customFile) && is_readable($customFile)) ? @file_get_contents($customFile) : null;
+		$customFileContents = $customFileContents ?: null;
+
+		if ($customFileContents === null)
+		{
+			define('AKEEBA_CACERT_PEM', $defaultCacertPath);
+
+			return;
+		}
+
+		$cacertContents = file_get_contents($defaultCacertPath);
+		self::$tempCaCert = tmpfile();
+		$tempCaCertPath = stream_get_meta_data(self::$tempCaCert)['uri'];
+		fwrite(self::$tempCaCert, $cacertContents);
+		fwrite(self::$tempCaCert,"\n\n");
+		fwrite(self::$tempCaCert,$customFileContents);
+
+		define('AKEEBA_CACERT_PEM', $tempCaCertPath);
+	}
+
+	/**
+	 * Load the user–provided bootstrap.php file, if one exists.
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	public static function loadUserCode(): void
+	{
+		if (!file_exists(APATH_USER_CODE . '/bootstrap.php'))
+		{
+			return;
+		}
+
+		require_once APATH_USER_CODE . '/bootstrap.php';
+	}
+
+	/**
+	 * Force Blade templates' recompilation when debug mode is enabled.
+	 *
+	 * @return  void
+	 * @throws  ReflectionException
+	 * @since   1.0.3
+	 */
+	public static function conditionallyForceBladeRecompilation(): void
+	{
+		if (!AKEEBADEBUG && !self::getInitialConfiguration()->get('debug', false))
+		{
+			return;
+		}
+
+		$refBlade = new ReflectionObject(Factory::getContainer()->blade);
+		$refProp  = $refBlade->getProperty('isCacheable');
+		$refProp->setValue(Factory::getContainer()->blade, false);
+	}
+
+	/**
+	 * Make sure we have a secret key set up for this installation.
+	 *
+	 * If the application is not configured yet, the secret is stored in tmp/secret.php.
+	 *
+	 * If the application is configured, we check if we need to transcribe the secret to the config.php file. In case a
+	 * .env file is being used we cannot write the secret. In this case, we just transcribe the secret to the runtime
+	 * application configuration. The secret will be stored in the tmp/secret.php file.
+	 *
+	 * @return void
+	 * @throws \Random\RandomException
+	 */
+	public static function applySecret()
+	{
+		// Do I already have a secret, e.g. through user code?
+		if (self::$secret)
+		{
+			return;
+		}
+
+		// Do I have a configured secret?
+		$secret = trim(self::getInitialConfiguration()->get('secret', null) ?? '');
+
+		if (!empty($secret))
+		{
+			return;
+		}
+
+		// Do I have a temporary file defining a secret?
+		if (file_exists(APATH_TMP . '/secret.php'))
+		{
+			require_once APATH_TMP . '/secret.php';
+		}
+
+		if (defined('AKEEBA_SECRET'))
+		{
+			// Adopt the secret we just loaded from tmp/secret.php so loadConfiguration() can transcribe it into
+			// config.php on this (or a subsequent) request. Without this, a configured-but-secret-less config.php
+			// would never receive the secret, and API/MCP token authentication would fail with `no_secret`.
+			self::$secret = AKEEBA_SECRET;
+
+			return;
+		}
+
+		// Create a new secret and save it into a temporary file.
+		$secret       = self::generateRandomSecret(64);
+		self::$secret = $secret;
+
+		$fileContent = <<< PHP
+<?php
+defined('AKEEBA') or die;
+if (!defined('AKEEBA_SECRET')) {
+	define('AKEEBA_SECRET', '{$secret}');
+}
+
+PHP;
+
+		self::$secretIsVolatile = file_put_contents(APATH_TMP . '/secret.php', $fileContent) === false;
+	}
+
+	/**
+	 * Generate a cryptographically strong, URL-safe random secret string.
+	 *
+	 * The output consists solely of the characters a-z, A-Z, and 0-9, making it safe to embed verbatim in a PHP
+	 * string literal (config.php) and in URLs. It is used both for the installation secret (see applySecret()) and by
+	 * the CLI configuration creation command.
+	 *
+	 * @param   int  $length  The number of characters to generate.
+	 *
+	 * @return  string
+	 * @throws  \Random\RandomException
+	 * @since   2.2.1
+	 */
+	public static function generateRandomSecret(int $length = 64): string
+	{
+		$allCharacters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+		$baseLength    = \strlen($allCharacters);
+		$outString     = '';
+		$sourceBytes   = random_bytes($length + 1);
+		$baseShift     = \ord($sourceBytes[0]);
+
+		for ($i = 1; $i <= $length; ++$i)
+		{
+			$outString .= $allCharacters[($baseShift + \ord($sourceBytes[$i])) % $baseLength];
+			$baseShift += \ord($sourceBytes[$i]);
+		}
+
+		return $outString;
+	}
+
+	/**
+	 * Loads the application configuration, if it exists.
+	 *
+	 * @return  void
+	 * @since   1.0.5
+	 */
+	public static function loadConfiguration(): void
+	{
+		$appConfig = Factory::getContainer()->appConfig;
+
+		// Only try to load the configuration file if we have one to begin with.
+		if (!self::hasConfiguration())
+		{
+			self::adoptPendingSecret($appConfig);
+
+			return;
+		}
+
+		$appConfig->loadConfiguration();
+
+		// Transfer the secret to the application configuration if necessary.
+		//
+		// tmp/secret.php is deleted when the configuration files already carry a secret (applySecret() will never
+		// read or recreate it), or after a successful transcription into config.php. It is kept when the secret only
+		// comes from the server environment (env-var/Docker mode), to avoid a write and unlink on every request.
+		$deleteOld = self::isSecretFileRedundant(self::getInitialConfiguration());
+
+		if (self::$secret && !$appConfig->get('secret'))
+		{
+			$appConfig->set('secret', self::$secret);
+
+			if ($appConfig->isReadWrite())
+			{
+				try
+				{
+					$appConfig->saveConfiguration();
+
+					$deleteOld = true;
+				}
+				catch (\Exception)
+				{
+					$deleteOld = false;
+				}
+			}
+		}
+
+		if ($deleteOld && @file_exists(APATH_TMP . '/secret.php'))
+		{
+			@unlink(APATH_TMP . '/secret.php');
+		}
+	}
+
+	/**
+	 * Use the pending secret from tmp/secret.php while there is no configuration yet, i.e. during setup.
+	 *
+	 * Setup writes this same secret into config.php. Without it, the session segment name, which is derived from the
+	 * secret, changes as soon as config.php is written, and the administrator just created by setup is logged out. A
+	 * volatile secret (tmp/secret.php could not be written) would change the segment on every request instead.
+	 *
+	 * @param   Registry  $appConfig  The application configuration.
+	 *
+	 * @return  void
+	 * @since   2.4.0
+	 */
+	private static function adoptPendingSecret(Registry $appConfig): void
+	{
+		if (self::$secret && !self::$secretIsVolatile)
+		{
+			$appConfig->set('secret', self::$secret);
+		}
+	}
+
+	/**
+	 * Is tmp/secret.php redundant, because the configuration files already have a secret?
+	 *
+	 * This is the normal case after setup, which writes the secret straight into config.php. It mirrors applySecret(),
+	 * which only reads tmp/secret.php when the initial configuration has no secret. A secret which only comes from the
+	 * server environment (a container's PANOPTICON_SECRET) does not count: applySecret() cannot see it, so deleting the
+	 * file would make it write a new one on the next request, and so on for every request.
+	 *
+	 * @param   Registry  $initialConfiguration  The configuration applySecret() decides with.
+	 *
+	 * @return  bool
+	 * @since   2.4.0
+	 */
+	private static function isSecretFileRedundant(Registry $initialConfiguration): bool
+	{
+		return trim((string) $initialConfiguration->get('secret', '')) !== '';
+	}
+
+	/**
+	 * Set up the User Manager, the user privileges, and the user authentication.
+	 *
+	 * @return  void
+	 * @since   1.0.5
+	 */
+	public static function setUpUserManager(): void
+	{
+		$container = Factory::getContainer();
+
+		$container->appConfig->set('user_class', User::class);
+		$manager = $container->userManager;
+
+		$manager->registerPrivilegePlugin('panopticon', UserPrivileges::class);
+		$manager->registerAuthenticationPlugin('password', UserAuthenticationPassword::class);
+	}
+
+	/**
+	 * Make sure the fallback language (en-GB) is always loaded
+	 *
+	 * @return  void
+	 * @since   1.0.6
+	 */
+	public static function fallbackLanguage()
+	{
+		$language = Factory::getContainer()->language;
+		$langCode = $language->getLangCode();
+
+		if ($langCode === 'en-GB')
+		{
+			return;
+		}
+
+		$language->loadLanguage('en-GB');
+		$language->loadLanguage($langCode);
+	}
+
+	public static function mySQLUseGMT()
+	{
+		try
+		{
+			Factory::getContainer()
+				->db
+				->setQuery("SET @@session.time_zone = '+0:00'")
+				->execute();
+		}
+		catch (Throwable)
+		{
+			// Ignore it if this fails.
+		}
+	}
+
+	public static function evaluateIPBlocking()
+	{
+		/** @var Loginfailures $loginfailures */
+		$loginfailures = Factory::getContainer()->mvcFactory->makeModel('Loginfailures');
+
+		try
+		{
+			$isIPBlocked = $loginfailures->isIPBlocked();
+		}
+		catch (\Exception $e)
+		{
+			return;
+		}
+
+		if (!$isIPBlocked)
+		{
+			return;
+		}
+
+			header('HTTP/1.0 403 Forbidden');
+
+		@include APATH_THEMES . '/system/forbidden.html.php';
+
+		exit();
+	}
+
+	/**
+	 * Addresses MySQL errors about the sort buffer being too short, especially when sending email..
+	 *
+	 * @return  void
+	 * @since   1.1.0
+	 */
+	public static function workaroundMySQLSortBufferSize(): void
+	{
+		try
+		{
+			Factory::getContainer()
+				->db
+				->setQuery('SET sort_buffer_size = 256000000')
+				->execute();
+		}
+		catch (Throwable)
+		{
+			// Ignore it if this fails.
+		}
+	}
+
+	/**
+	 * Overrides the Symfony error-handler classes with our locally customised versions.
+	 *
+	 * We ship modified copies of two Symfony error-handler classes under patches/symfony-error-handler/:
+	 *  - FlattenException: surface the real exception message as the status text.
+	 *  - HtmlErrorRenderer: give the non-debug "simple" error page the same rich template context as the debug page
+	 *    (our templates/system/fatal.php needs $exception), and let the active theme override error templates/assets.
+	 *
+	 * Each copy declares the same namespace and class name as the upstream original, so require-ing it here — before
+	 * Composer's autoloader can define the upstream version — makes PHP use our version everywhere. The copies must be
+	 * loaded before anything references the upstream classes; this method is called very early, from
+	 * applyExceptionsHandler().
+	 *
+	 * Why full copies rather than overriding the two private methods in a subclass? A subclass cannot override a
+	 * private method — the parent's own code keeps calling the parent's private version — so the whole class has to be
+	 * copied regardless.
+	 *
+	 * Historical note: this used to patch the classes at runtime (read the upstream source, str_replace it, write the
+	 * result to an `awf://` stream-wrapper file, require it, then unlink it). That "read → rewrite → write → execute →
+	 * delete" sequence is textbook file-dropper behaviour and got both this file and the generated files flagged as
+	 * malware by heuristic scanners (e.g. Imunify360, SMW-INJ-CLOUDAV-php.dropper.file-*). Such scanners inspect files
+	 * at rest, so obfuscation cannot help; shipping the modified classes as ordinary files removes the pattern entirely.
+	 * See patches/README.md and tests/Unit/Application/ErrorHandlerPatchesTest.php (the drift detector).
+	 *
+	 * @return  void
+	 * @since   1.0.3
+	 */
+	private static function overrideHtmlErrorRenderer(): void
+	{
+		require_once APATH_BASE . '/patches/symfony-error-handler/FlattenException.php';
+		require_once APATH_BASE . '/patches/symfony-error-handler/HtmlErrorRenderer.php';
+	}
+
+	/**
+	 * Get a Registry object with the configuration variables provided in the best matched config file.
+	 *
+	 * @return  Registry
+	 * @since   1.0.3
+	 */
+	private static function getInitialConfiguration(): Registry
+	{
+		static $registry = null;
+
+		if (!is_null($registry))
+		{
+			return $registry;
+		}
+
+		$registry = new Registry();
+
+		if (!self::hasConfiguration())
+		{
+			return $registry;
+		}
+
+		if (self::hasConfiguration(true))
+		{
+			$environment = $_SERVER['PANOPTICON_ENVIRONMENT'] ?? $_ENV['PANOPTICON_ENVIRONMENT'] ?? 'production';
+			$dotEnv      = Dotenv::createArrayBacked(
+				[
+					APATH_CONFIGURATION,
+					APATH_USER_CODE,
+				], [
+					'/.env',
+					'/.env.' . $environment,
+				]
+			);
+			$loaded      = $dotEnv->safeLoad();
+
+			$loaded = array_combine(
+				array_map(
+					fn($x) => strtolower(substr($x, 11)), array_keys($loaded)
+				), array_values($loaded)
+			);
+
+			$registry->loadArray($loaded);
+		}
+		else
+		{
+			ob_start();
+			require_once APATH_CONFIGURATION . '/config.php';
+			ob_end_clean();
+
+			if (!class_exists(\AConfig::class))
+			{
+				$registry = null;
+
+				return $registry;
+			}
+
+			$registry->loadObject(new AConfig());
+		}
+
+		return $registry;
+	}
+}

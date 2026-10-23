@@ -1,0 +1,198 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+namespace Akeeba\Panopticon\Controller;
+
+defined('AKEEBA') || die;
+
+use Akeeba\Panopticon\Controller\Trait\ACLTrait;
+use Akeeba\Panopticon\Library\Task\TasksPausedTrait;
+use Awf\Mvc\Controller;
+
+class Selfupdate extends Controller
+{
+	use ACLTrait;
+	use TasksPausedTrait;
+
+	public function execute($task)
+	{
+		$this->aclCheck($task);
+
+		return parent::execute($task);
+	}
+
+	public function onBeforeDefault(): bool
+	{
+		if ($this->getTasksPausedFlag())
+		{
+			$this->setTasksPausedFlag(false);
+		}
+
+		$force = $this->input->getInt('force', false);
+
+		if ($force)
+		{
+			/** @var \Akeeba\Panopticon\Model\Selfupdate $model */
+			$model = $this->getModel();
+			$model->bustCache();
+			$model->getUpdateInformation(true);
+
+			$this->setRedirect($this->getContainer()->router->route('index.php?view=selfupdate'));
+
+			$this->redirect();
+		}
+
+		$this->getView()->force = $force;
+
+		return true;
+	}
+
+	public function preupdate()
+	{
+		$this->csrfProtection();
+
+		if (defined('APATH_IN_DOCKER') && APATH_IN_DOCKER)
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=selfupdate'),
+				$this->getLanguage()->text('PANOPTICON_SELFUPDATE_ERR_UNDERDOCKER'),
+				'error'
+			);
+
+			return;
+		}
+
+		if (!$this->getTasksPausedFlag())
+		{
+			$this->setTasksPausedFlag(true);
+		}
+
+		if (!$this->areTasksRunning())
+		{
+			$token = $this->container->session->getCsrfToken()->getValue();
+			$url   = $this->container->router->route('index.php?view=selfupdate&task=update')
+			         . '&' . urlencode($token) . '=1';
+
+			$this->setRedirect($url);
+		}
+
+		$this->getView()->setLayout('preupdate');
+		$this->display();
+	}
+
+	public function update()
+	{
+		$this->csrfProtection();
+
+		if (defined('APATH_IN_DOCKER') && APATH_IN_DOCKER)
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=selfupdate'),
+				$this->getLanguage()->text('PANOPTICON_SELFUPDATE_ERR_UNDERDOCKER'),
+				'error'
+			);
+
+			return;
+		}
+
+		/** @var \Akeeba\Panopticon\Model\Selfupdate $model */
+		$model = $this->getModel();
+
+		try
+		{
+			$targetFile = $model->download();
+		}
+		catch (\Exception $e)
+		{
+			$url = $this->container->router->route('index.php?view=selfupdate');
+
+			$this->setRedirect(
+				$url,
+				$this->getLanguage()->text('PANOPTICON_SELFUPDATE_ERR_DOWNLOADFAILED') . ' ' . $e->getMessage()
+			);
+		}
+
+		$this->container->segment->setFlash('selfupdate.localfile', $targetFile);
+
+		$token = $this->container->session->getCsrfToken()->getValue();
+		$url   = $this->container->router->route('index.php?view=selfupdate&task=install')
+		         . '&' . urlencode($token) . '=1';
+
+		$this->setRedirect($url);
+	}
+
+	public function install()
+	{
+		$this->csrfProtection();
+
+		if (defined('APATH_IN_DOCKER') && APATH_IN_DOCKER)
+		{
+			$this->setRedirect(
+				$this->container->router->route('index.php?view=selfupdate'),
+				$this->getLanguage()->text('PANOPTICON_SELFUPDATE_ERR_UNDERDOCKER'),
+				'error'
+			);
+
+			return;
+		}
+
+		/** @var \Akeeba\Panopticon\Model\Selfupdate $model */
+		$model = $this->getModel();
+
+		try
+		{
+			$sourceFile = $this->container->segment->getFlash('selfupdate.localfile');
+
+			$model->performInstall($sourceFile);
+		}
+		catch (\Exception $e)
+		{
+			$url = $this->container->router->route('index.php?view=selfupdate');
+
+			$this->setRedirect(
+				$url,
+				$this->getLanguage()->text('PANOPTICON_SELFUPDATE_ERR_EXTRACTFAILED') . ' ' . $e->getMessage()
+			);
+		}
+
+		$token = $this->container->session->getCsrfToken()->getValue();
+		$url   = $this->container->router->route('index.php?view=selfupdate&task=postinstall')
+		         . '&' . urlencode($token) . '=1';
+
+		$this->setRedirect($url);
+	}
+
+	public function postinstall()
+	{
+		$this->csrfProtection();
+
+		/** @var \Akeeba\Panopticon\Model\Selfupdate $model */
+		$model = $this->getModel();
+
+		try
+		{
+			$model->postUpdate();
+
+			$this->setTasksPausedFlag(false);
+		}
+		catch (\Exception $e)
+		{
+			$url = $this->container->router->route('index.php?view=selfupdate');
+
+			$this->setRedirect(
+				$url,
+				$this->getLanguage()->text('PANOPTICON_SELFUPDATE_ERR_POSTINSTALLFAILED') . ' ' . $e->getMessage()
+			);
+		}
+
+		$url = $this->container->router->route(
+			'index.php?view=selfupdate', $this->getLanguage()->text('PANOPTICON_SELFUPDATE_LBL_SUCCESS')
+		);
+
+		$this->setRedirect($url);
+	}
+}

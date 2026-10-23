@@ -1,0 +1,119 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+namespace Akeeba\Panopticon\Library\DataShape;
+
+defined('AKEEBA') || die;
+
+use ArrayAccess;
+use InvalidArgumentException;
+
+class AbstractDataShape implements ArrayAccess
+{
+	public function __construct($array = [])
+	{
+		if (!is_array($array) && !($array instanceof self))
+		{
+			throw new InvalidArgumentException(sprintf('%s needs an array or a %s object', __METHOD__, self::class));
+		}
+
+		foreach (($array instanceof self) ? $array->asArray() : $array as $k => $v)
+		{
+			$this->$k = $v;
+		}
+	}
+
+	public function merge($newValues): self
+	{
+		if (!is_array($newValues) && !($newValues instanceof self))
+		{
+			throw new InvalidArgumentException(sprintf('%s needs an array or a %s object', __METHOD__, self::class));
+		}
+
+		foreach (($newValues instanceof self) ? $newValues->asArray() : $newValues as $k => $v)
+		{
+			if (!isset($this->{$k}))
+			{
+				continue;
+			}
+
+			$this->$k = $v;
+		}
+
+		return $this;
+	}
+
+	public function asArray(): array
+	{
+		return get_object_vars($this);
+	}
+
+	public function __get($name)
+	{
+		$methodName = 'get' . ucfirst((string) $name);
+
+		if (method_exists($this, $methodName))
+		{
+			return $this->{$methodName};
+		}
+
+		if (property_exists($this, $name))
+		{
+			return $this->{$name};
+		}
+
+		throw new InvalidArgumentException(sprintf('Property %s not found in %s', $name, self::class));
+	}
+
+	public function __set($name, $value)
+	{
+		$methodName = 'set' . ucfirst((string) $name);
+
+		if (method_exists($this, $methodName))
+		{
+			$this->{$methodName}($value);
+
+			return null;
+		}
+
+		if (property_exists($this, $name))
+		{
+			$this->{$name} = $value;
+
+			return null;
+		}
+
+		throw new InvalidArgumentException(sprintf('Property %s not found in %s', $name, self::class));
+	}
+
+	public function __isset($name): bool
+	{
+		$methodName = 'get' . ucfirst((string) $name);
+
+		return method_exists($this, $methodName) || property_exists($this, $name);
+	}
+
+	public function offsetExists(mixed $offset): bool
+	{
+		return isset($this->{$offset});
+	}
+
+	public function offsetGet(mixed $offset): mixed
+	{
+		return $this->{$offset};
+	}
+
+	public function offsetSet(mixed $offset, mixed $value): void
+	{
+		$this->{$offset} = $value;
+	}
+
+	public function offsetUnset(mixed $offset): void
+	{
+		throw new \LogicException(sprintf('You cannot unset members of %s', self::class));
+	}
+}

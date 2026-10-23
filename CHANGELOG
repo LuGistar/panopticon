@@ -1,0 +1,373 @@
+<?php die(); ?>
+Akeeba Panopticon 2.4.0
+================================================================================
+! Security hardening: CSRF token checks, TOTP secret generation, JSONP in JSON views, IIS web.config rules (AWF 1.3.1)
++ Akeeba Backup JSON API v3 support, using the site's existing Joomla! API Token instead of the Secret Word
+~ Docker images now use PHP 8.5.12, which includes a critical security update from the PHP project
+# [HIGH] Task queue: mass extension install stalled after about 30 sites, and tasks could run twice [gh-1060]
+# [HIGH] Sites: Joomla site pages could fail with "Error calling repeatable" after viewing a WordPress site
+# [HIGH] Setup: could never finish when config.php was not writable and had to be uploaded by hand
+# [HIGH] Setup: new installations went to the login page after creating the administrator account
+# [MEDIUM] Tasks: per-site log files were never closed, leaking file handles in task:run --loop [gh-1060]
+# [MEDIUM] Translations: broken links and stray backslashes, e.g. MFA "Print these codes" led to a 404 page [gh-1081]
+# [MEDIUM] Translations: many messages left out their values or read "BAD TRANSLATION", e.g. Joomla! versions in Dutch
+# [LOW] API token authentication triggered a PHP 8.5 deprecation notice
+# [LOW] Mass extension install: a failed extensions refresh could mark a successful install as failed [gh-1060]
+# [LOW] System Configuration: the Have I Been Pwned and Gravatar links did not open in a new tab
+# [LOW] Translations: 128 newer messages, e.g. the Connection Doctor and Extensions view, were shown in English
+# [LOW] Translations: some help texts were shortened, or lost their links and formatting, compared to English
+# [LOW] French: the Multi-factor Authentication page had a garbled title, and "authentification" was misspelt
+# [LOW] API Tokens: the token quota read "BAD TRANSLATION" instead of how many tokens you have created
+# [LOW] Joomla! update log: the message about enabling Joomla Update's extraction script showed a stray backslash
+# [LOW] The English language file could not be read by standard INI parsers and translation tools
+# [LOW] Language tools: every INI to PO conversion added one more level of escaping to double quotes [gh-1081]
+# [LOW] Sites: WordPress themes were labelled "Template" instead of "Theme" in the plugins and themes list
+# [LOW] CLI: user:create and user:set reported "Could not save user" even though the user was saved
+# [LOW] Updated view templates could keep running stale code on servers with OPcache timestamp checks disabled
+# [LOW] Emails: translated templates, e.g. German, were ignored for plain-text emails and the update summary email
+# [LOW] CLI: user:add showed a PHP stack trace instead of an error message when the user could not be saved
+# [LOW] Some view templates could be requested directly, revealing the server path when PHP errors are shown
+# [LOW] CLI: user commands showed a raw exception instead of an error message for passwords found in data breaches
+
+Akeeba Panopticon 2.3.1
+================================================================================
++ Update result emails now state the old and the new version of each extension, plugin, and theme [gh-1049]
+# [HIGH] Update result emails had an empty body whenever an extension, plugin, or theme failed to update (since 1.0.0 on Joomla!, since 1.2.0 on WordPress)
+# [HIGH] Action links in the auto-refreshed dashboard table redirected to the raw AJAX endpoint [gh-1042]
+# [MEDIUM] Group edit: the colour swatches were invisible, and the selected colour was not indicated [gh-1046]
+# [MEDIUM] WordPress sites showed generic fallback on connection errors due to variable typo [gh-1039]
+# [LOW] Group edit: the custom colour field mangled what you typed, and the preview badge was empty on a new group [gh-1046]
+# [LOW] Site Groups filter: the search button wrapped onto a second line, and the field was shorter than the search box [gh-1047]
+# [LOW] Viewing a site's Notes emitted spurious PHP warnings about unsupported figure/figcaption elements
+
+Akeeba Panopticon 2.3.0
+================================================================================
+! SSRF via Connection Doctor and Uptime Monitor [GHSA-6234-p3mh-7j3x]
++ Extensions view: all extensions across all sites [gh-1015]
++ Joomla Update Doctor: diagnoses why a Joomla core update fails or gets stuck
++ `token:create` CLI command to mint an API token for a user
++ Optional sticky page header and toolbar, configurable application-wide and per user [gh-1025]
++ Toolbar buttons collapse into a menu on narrow displays
++ Groups can be given a colour, shown on the site badges [gh-1023]
+~ Reports are now sorted by date descending [gh-1032]
+# [HIGH] Occasional PHP error on group edit and permission checks
+# [HIGH] Per-group API token limit wasn't applied [gh-965]
+# [HIGH] System-level emails crashed with a TypeError and were never sent [gh-1009]
+# [HIGH] MCP server and JSON API returned 401 when server stripped HTTP Authorization header [gh-1010]
+# [HIGH] MCP server and JSON API token authentication failed with "no_secret" on config.php missing secret [gh-1010]
+# [HIGH] Short /mcp endpoint returned a 404 due to no rewrite rule in htaccess.txt
+# [HIGH] The _panopticon_token query parameter failed for Base64 tokens containing "+"
+# [HIGH] Refactored code to avoid false positives in some anti-malware scanners e.g. Immunify360
+# [MEDIUM] Web Push notifications were not sent in each recipient's own language as intended [gh-1027]
+# [MEDIUM] Scheduled update summary emails re-sent duplicate notifications on every run
+# [HIGH] Log viewer showed a blank or error page when the interface language was not English [gh-1035]
+# [LOW] Completed one-shot tasks (e.g. extension install) were never deleted [gh-1034]
+# [LOW] Log viewer dropped the first line of any log read in full, showing an empty table for a one-line log [gh-1036]
+
+Akeeba Panopticon 2.2.0
+================================================================================
+! [CRITICAL] API token management vulnerabilities due to insufficient checks
+! Insufficient checks when canceling a Joomla core update task
+! Sites batch processing had insufficient checks
+! Log viewer had insufficient checks
+! Self-update tasks had a CSRF vulnerability, but without much practical interest
+! Information disclosure in the PHP information page
+! Extension/plugin update scheduling had insufficient checks
+! Missing anti-CSRF checks on logout, decline consent, and the site connection doctor
+! The reports view had insufficient checks
++ Optional MCP (Model Context Protocol) server for AI agents and chatbots [gh-1000]
++ Core File Integrity Check now supports WordPress sites [gh-979]
++ Configurable base URL for the Core File Integrity checksums source [gh-981]
++ Machine translation to German (de-DE)
+~ Main update source is now https://getpanopticon.com/update.json
+~ Template Overrides view now consistently requires the admin privilege on the site (view and its entry button)
+# [HIGH] Site refresh/update-scheduling applied too-tight authorisation checks
+# [HIGH] Extension updates: fatal "Cannot use object of type stdClass as array" error when reporting update results [gh-1001]
+
+Akeeba Panopticon 2.1.1
+================================================================================
+# [HIGH] JSON API completely broken in release archives; routes.php was excluded from packages [gh-994]
+
+Akeeba Panopticon 2.1.0
+================================================================================
+! [CRITICAL] MFA bypass for password-only users
++ Configurable API token limit per user, with optional per-group overrides [gh-965]
++ Add JSON API (#344)
++ API token scopes for fine-grained access control [gh-967]
++ API endpoints for site status and global dashboard stats, e.g. for Home Assistant integration [gh-969]
++ Task log files are attached to failure notification emails for CMS updates, extension/plugin updates, core file integrity checks, and the PHP File Change Scanner, with configurable per-group delivery
+~ Structured debug-level logging of HTTP responses (status, Content-Type, headers, body) across all remote API tasks; binary payloads reported as BLOB size sentinels; auth headers redacted
+~ Akeeba Backup API calls additionally log the sanitised request URL and parameters at debug level; the _akeebaAuth secret and CMS tokens are redacted from all log output
+~ More verbose debug-level logging of remote server responses in the Joomla core update task
+~ Upgraded TinyMCE to 8.6.0 (includes DOMPurify 3.4.5 security update)
+~ Upgraded passkey / WebAuthn library to version 5.3
+~ PHP 9 compatibility: removed retired #[ReturnTypeWillChange] attributes and added proper return types [gh-985]
+~ Improved Docker image build
+# [HIGH] Stored XSS vulnerabilities in several Blade templates
+# [HIGH] Passkey login and MFA regressions introduced by the WebAuthn library upgrade
+
+Akeeba Panopticon 2.0.1
+================================================================================
++ Schedule automatic extension, plugin, and theme updates for a specific time of day, mirroring the CMS Update option
++ Filter sites by CMS version, PHP version, extension name, author, author URL, and update status in the Install Extension page [gh-962]
+
+Akeeba Panopticon 2.0.0
+================================================================================
++ User self-registration [gh-726]
++ PII self-management: legal policies, user consent, data export, and account self-deletion
++ Web Push notifications as a complementary channel alongside email
++ Check integrity of Joomla core files against known-good checksums [gh-20]
++ Remote / mass extension installation across multiple sites [gh-346]
++ reCAPTCHA Invisible and hCaptcha CAPTCHA providers for user registration
++ Administrator email notification when a new user registration awaits approval
++ Password complexity validation for user registration
++ CLI commands for managing groups, mail templates, tasks, and backup/scanner schedules
++ Links to the Connection Troubleshooting wiki page
++ Periodic auto-refresh of the sites overview table
++ Periodic auto-refresh of the site information page
+~ PHP 8.5 compatibility
+~ Sort task type filter options alphabetically by translated name
+~ Docker image updated to PHP 8.4 [gh-957]
+# [LOW] Missing ACL entry for the site sections auto-refresh task
+# [LOW] PHP deprecation notice in session encryption when no secret is configured
+# [LOW] Cannot save the "Accurate PHP-CLI path" setting.
+# [MEDIUM] Missing PHP expiration dates can cause a fatal error displaying a site.
+# [MEDIUM] Invalid dates (e.g. in backups) can cause a fatal error.
+# [HIGH] Manually enqueueing a WordPress plugin update in the UI does not schedule the plugins update task for the site.
+# [HIGH] Unpublishing a site does not disable its scheduled tasks; re-publishing restores them.
+
+Akeeba Panopticon 1.3.2
+================================================================================
++ Tips to connect Akeeba Backup Professional for WordPress to Panopticon
+~ More verbose logging when enqueueing emails.
+~ Improve adding WordPress sites
+
+Akeeba Panopticon 1.3.1
+================================================================================
++ Better worded messages when you have Akeeba Backup Core instead of Professional
+~ Make accurate PHP CLI path detection optional
+# [HIGH] CRON jobs didn't work correctly in the Docker image [gh-856]
+# [HIGH] Cannot set up update preferences for Joomla! extensions whose name does nor conform to Joomla's standards (even though Joomla allows them to be installed, because it fails to enforce its own naming standards!)
+# [MEDIUM] Site Information doesn't show extension errors
+# [MEDIUM] PHP error trying to log in with a username that doesn't exist
+# [LOW] Logs and Tasks views: warning if there's a log/task belonging to a deleted site
+# [LOW] If an extension's short name starts with the character `a`, that letter is cut off
+
+Akeeba Panopticon 1.3.0
+================================================================================
++ Domain registration and expiration warnings
++ Force MFA for specific user groups, superusers, or administrators [gh-723]
++ Option to treat MFA failures as login failures [gh-723]
++ Enforce a maximum number of MFA attempts [gh-723]
++ Accurate PHP CLI path in the CRON job setup page
++ Improve update installation [gh-803]
+# [HIGH] Cannot connect to really old WordPress installations (WordPress 5.5 and earlier)
+# [HIGH] Cannot connect to old Akeeba Backup for WordPress (version 7)
+# [HIGH] PHP error when WordPress fails to provide version information
+# [LOW] Connection Doctor causes misleading reports on WordPress [gh-807]
+
+Akeeba Panopticon 1.2.2
+================================================================================
++ Optional environment variables-only configuration of containerized Panopticon [gh-696]
++ Clear the cache when relinking a site to Akeeba Backup
+~ Do not log CMS Update Found more than once per version
+# [MEDIUM] Repeated emails for WordPress plugin updates
+# [LOW] Wrong lang string used in WordPress plugin/theme update emails
+# [LOW] PHP warnings running Connection Doctor on WordPress sites
+# [LOW] Wrong "email" label on Backup options [gh-771]
+
+Akeeba Panopticon 1.2.1
+================================================================================
+! Fixing a chicken and egg issue not allowing the update to proceed correctly
+
+Akeeba Panopticon 1.2.0
+================================================================================
++ WordPress support [gh-38]
++ Much improved Docker support [gh-697]
++ Translatable dates
++ Load TinyMCE translations
++ Batch processing sites
++ Control email sending for scheduled backups [gh-712]
++ Auto-ban IPs after many failed login attempts
++ Check passwords against HIBP [gh-728]
+~ System Configuration uses more Show On tricks to show/hide relevant settings
+~ Expose the Avatars setting in System Configuration [gh-729]
+~ Session data contents are now encrypted at rest
+~ Session improvements
+~ Expose the Behind Load Balancer configuration setting
+~ Do not send a failure email if a site queued for update is already updated, or disabled
+# [HIGH] Some tasks would disable MySQL autocommit without restoring it, leading to weird issues
+# [MEDIUM] MaxExec task throws fatal exception when tasks are executed over the web
+# [LOW] Wrong message about not having Akeeba Backup installed shown when adding a new site [gh-661]
+# [LOW] Wrong language in mail Blade templates [gh-658]
+# [LOW] Groups for disabled sites may not be displayed in the Sites admin page
+# [LOW] Connection doctor: sometimes ends up with an error page instead of showing what is going on with the connection
+# [LOW] High CPU usage warning when the server does not report CPU usage at all
+# [LOW] Update failure email missing site name if site is already up-to-date
+# [LOW] Update Director would claim a site is enqueued for updates when it's not
+# [LOW] Per-language overrides of extension update emails might not have an effect
+
+Akeeba Panopticon 1.1.3
+================================================================================
+# [HIGH] Cannot update to new Joomla! version if "only minor" update strategy is selected.
+
+Akeeba Panopticon 1.1.2
+================================================================================
+~ Long PHP version is now truncated in Dashboard view
+~ Better compatibility with some ancient MySQL versions
+# [HIGH] Database installation errors are not communicated at installation time
+# [HIGH] Panopticon database backups on Windows are empty [gh-552]
+# [HIGH] Canceling causes a PHP error for some user groups [gh-583]
+# [HIGH] Premature auto-start of the session
+# [MEDIUM] Dashboard doesn't load if a site doesn't report its CMS version
+# [MEDIUM] The SSL/TLS expiration task would fail on MariaDB [gh-562]
+# [LOW] The default .htaccess causes the ACE Editor to throw a JavaScript console warning [gh-561]
+
+Akeeba Panopticon 1.1.1
+================================================================================
++ Send scheduled reports to specific groups [gh-521]
+~ Connection doctor: detect Akeeba Backup Core for Joomla! 3
+~ Improve the X-Mailer and Reply-To headers in sent emails
+~ Internal support for sending email only to selected user groups
+# [HIGH] Cannot launch installation due to a missing character
+# [HIGH] Tasks would be picked up by multiple task runners running in parallel (MySQL race condition)
+# [MEDIUM] No visible error message when the site information update fails [gh-523]
+# [MEDIUM] PHPmailer throws a simple RuntimeException in some cases, which was not being caught
+# [MEDIUM] Custom CLI commands in user_code where not autoloaded
+# [MEDIUM] Custom tasks in user_code where not autoloaded
+# [LOW] Extraneous slash in mail messages' `[URL]` variable [gh-519]
+# [LOW] Joomla update failures could result in the wrong error message displayed
+# [LOW] Missing or small favicons can create layout issues [gh-522]
+# [LOW] Connection to Akeeba Backup reset when saving site without changing connection information [gh-534]
+
+Akeeba Panopticon 1.1.0
+================================================================================
++ Dashboard layout for Sites Overview [gh-395]
++ Scheduled Site Action Report Emails [gh-303]
++ Basic uptime monitoring [gh-491]
++ Plugin system
++ SSL/TLS certificate information display, and sending expiration warning emails [gh-397]
++ Select language in Setup [gh-384]
++ Change the rotated log names [gh-398]
++ Report latest backup status [gh-396]
++ Support for site favicons
++ Preload hints, and HTTP 103 Early Hints [gh-458]
++ Language selection after logging in [gh-490]
++ Additional colour themes (CSS) and easier theme selection
++ Access a site's logs and tasks directly from the Site Information page
+~ Running `composer install` will now always create the `version.php` file
+~ Don't show backup and scanner scheduling buttons unless corresponding software installed [gh-413]
+~ More accessible ID column labels [gh-446]
+# [HIGH] The Joomla! Update state could appear to be inconsistent
+# [HIGH] Users should not be able to be copied [gh-481]
+# [MEDIUM] Sending emails with the default language results in untranslated variables
+# [LOW] PHP error when the browser returns invalid data during WebAuthn [gh-406]
+# [LOW] TinyMCE content always dark [gh-410]
+# [LOW] Backup not Pro when extension not installed [gh-414]
+# [LOW] Date/time parsing on reports view [gh-419]
+# [LOW] MFA method setup has non-functional toolbar buttons [gh-468]
+# [LOW] Filtering the log files by site name did not work consistently
+
+Akeeba Panopticon 1.0.7
+================================================================================
+# [HIGH] Error when your PHP version is out of date [gh-392]
+# [HIGH] “You do not seem to have Akeeba Backup Professional installed.” viewing some sites
+
+Akeeba Panopticon 1.0.6
+================================================================================
++ Connection Doctor [gh-345]
++ Site notes [gh-363]
+~ Improve login language selection [gh-367]
+~ Translations now use PO files instead of a third party service
+~ Light and Dark Mode for the TinyMCE and ACE editors
+# [HIGH] Wrong assignment of sites to groups if there are gaps in numbering [gh-360]
+# [MEDIUM] No fallback to English if the browser, user configuration, and global configuration don't include it [gh-368]
+# [MEDIUM] No TinyMCE editor when using the `.htaccess` file
+# [LOW] SMTP Authentication radio always appears disabled when loading System Configuration [gh-390]
+
+Akeeba Panopticon 1.0.5
+================================================================================
++ Scheduled Available Update Summary Emails [gh-301]
++ Detect stuck extension updates and allow rescheduling, or canceling [gh-304]
++ Allow immediate email sending [gh-306]
++ Allow the global update preference of an extension to be "email" [gh-309]
++ Detect when scheduled tasks are falling behind [gh-315]
++ Site configuration management CLI commands [gh-153]
++ Collection and display of basic server information [gh-307]
++ Per-user language preference [gh-326]
++ Groups act as tags for site filtering [gh-333]
++ Automatic API data sanitization [gh-341]
+~ Strip HTML tags from extension names, and their author names [gh-349]
+# [LOW] Test email message showed %s instead of the Panopticon URL
+# [LOW] Can't create a group without permissions [gh-335]
+# [LOW] Work around possible deadlocks trying to save site or extension information
+
+Akeeba Panopticon 1.0.4
+================================================================================
++ Site reports (updates, backups, file scanner, Admin Tools actions) [gh-220]
++ Support for custom templates [gh-249]
++ Send test email [gh-267]
++ Major performance improvement for scheduled tasks
++ Extension list search box [gh-247]
+- Removed avatars
+# [MEDIUM] Repeated notifications for updates if more than one extension with updates is found [gh-258]
+# [MEDIUM] Cannot access My Profile page [gh-241]
+# [MEDIUM] PHP error in the Extensions Updates page if you have extensions with missing Download Keys [gh-240]
+# [HIGH] Post-update code does not apply database changes [gh-283]
+
+Akeeba Panopticon 1.0.3
+================================================================================
++ .env support [gh-34]
++ Anonymous usage statistics collection [gh-215]
++ Link to self-update page even without any updates found [gh-209]
++ Periodic database backup [gh-223]
+# [HIGH] Regression: can't access Setup
+# [HIGH] Old MariaDB versions don't support JSONPath [gh-201]
+# [HIGH] Very low self-update timeout (5 seconds) [gh-185]
+# [HIGH] Too tight permissions check
+# [MEDIUM] Users with only Add Own and Edit Own privileges cannot add sites [gh-203]
+# [LOW] Some mail templates may be missing due to typo [gh-226]
+# [LOW] SCSS files were excluded [gh-233]
+
+Akeeba Panopticon 1.0.2
+================================================================================
+! Security [critical]: non-super users can change or remove other users, including super users
++ TOTP Multi-factor Authentication (gh-168)
++ Extensions Update Overview page (gh-178)
++ Core Updates Overview page (gh-178)
++ Automated task to check for self-updates (gh-174)
++ Take a backup before updating Joomla! (gh-16)
+~ Improve behavior clicking Edit without selecting a site
+~ Improve the MFA method selection layout
+~ Caching tweaks
+# [LOW] Missing email template type for failed Joomla! update
+# [LOW] Invalid extensions could cause PHP errors listing a site's extensions
+
+Akeeba Panopticon 1.0.1
+================================================================================
+! Security update: TinyMCE 6.7.1
+~ Update Gravatar URLs with SHA-256
++ Cancel pending Joomla! update (gh-162)
++ Joomla! version support status (gh-163)
++ Link to the data source for the PHP version information
++ Debug information for the initial connection
++ Note when updates are running on each site
+# [HIGH] Constant core update rescheduling / emails
+# [HIGH] Constant extensions update rescheduling / emails
+# [HIGH] Cannot connect to Joomla! 3 sites which don't have SEF URLs with URL rewriting enabled
+# [HIGH] Manually scheduled Joomla! updates are cancelled when evaluating automatic updates
+# [HIGH] PHP error when there are backup records without a backup start time
+# [MEDIUM] Joomla! Update options falsely claim that the time to install updates is in GMT; it's local
+# [MEDIUM] Log view: timezone calculation was wrong
+# [MEDIUM] Log view: no site names shown
+# [MEDIUM] Wrong indication of stuck core and site update tasks in the overview page
+# [LOW] Log view: undefined property warning, leads to the site list being empty
+# [LOW] Possible PHP issue with ForkedLogger
+# [LOW] Filters on the Task page partially overlapped (cosmetic issue)
+# [LOW] Leftover phpinfo.php file in the public root
+# [LOW] Guzzle may return NULL response when trying to connect a site
+# [LOW] PHP 8 deprecated notices sending emails
+
+Akeeba Panopticon 1.0.0
+================================================================================
++ Initial release

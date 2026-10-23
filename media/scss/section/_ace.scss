@@ -1,0 +1,12 @@
+/*!*
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+.ace_editor {
+  height: min(400px, 30vh);
+  border-width: var(--bs-border-width);
+  border-style: var(--bs-border-style);
+  border-color: var(--bs-border-color);
+}

@@ -1,0 +1,1307 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ~ @package   panopticon
+  ~ @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+  ~ @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+  -->
+<schema>
+    <meta>
+        <drivers>
+            <driver>mysqli</driver>
+            <driver>pdomysql</driver>
+        </drivers>
+    </meta>
+
+    <sql>
+        <action table="#__akeeba_common" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__akeeba_common`
+(
+    `key`   VARCHAR(255) NOT NULL,
+    `value` LONGTEXT     NOT NULL,
+    PRIMARY KEY (`key`(64))
+)
+    DEFAULT COLLATE utf8mb4_unicode_ci
+    ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+        <action table="#__users" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__users`
+(
+    `id`         BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+    `username`   VARCHAR(255)        NOT NULL,
+    `name`       VARCHAR(255)        NOT NULL,
+    `email`      VARCHAR(255)        NOT NULL,
+    `password`   VARCHAR(255)        NOT NULL,
+    `parameters` LONGTEXT,
+    PRIMARY KEY (`id`)
+)
+    DEFAULT COLLATE utf8mb4_unicode_ci
+    ENGINE = InnoDB;
+]]></query>
+        </action>
+
+        <action table="#__sites" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__sites`
+(
+    `id`          SERIAL,
+    `name`        VARCHAR(255)     NOT NULL,
+    `url`         VARCHAR(1024)    NOT NULL,
+    `enabled`     TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    `created_on`  DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `created_by`  BIGINT UNSIGNED  NOT NULL,
+    `modified_on` DATETIME         NULL,
+    `modified_by` BIGINT UNSIGNED  NULL,
+    `locked_on`   DATETIME         NULL,
+    `locked_by`   BIGINT UNSIGNED  NULL,
+    `config`      JSON,
+    `notes`       LONGTEXT         NULL,
+    FOREIGN KEY `#__sites_users_created` (`created_by`) REFERENCES `#__users` (`id`) ON DELETE CASCADE,
+    FOREIGN KEY `#__sites_users_modified` (`modified_by`) REFERENCES `#__users` (`id`) ON DELETE SET NULL,
+    FOREIGN KEY `#__sites_users_locked` (`locked_by`) REFERENCES `#__users` (`id`) ON DELETE SET NULL,
+    PRIMARY KEY (`id`),
+    KEY `#__sites_name` (`name`(50))
+)
+    DEFAULT COLLATE utf8mb4_unicode_ci
+    ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+        <action table="#__sites" canfail="1">
+            <condition type="missing" value="notes"/>
+            <query><![CDATA[
+ALTER TABLE `#__sites` ADD COLUMN `notes` LONGTEXT NULL AFTER `config`;
+]]></query>
+        </action>
+
+        <action table="#__sites" canfail="1">
+            <condition type="index" operator="not"><![CDATA[#__sites_name]]></condition>
+            <query><![CDATA[
+ALTER TABLE `#__sites`
+ADD INDEX `#__sites_name` (`name`(50));
+]]></query>
+        </action>
+
+        <action table="#__tasks" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__tasks`
+(
+    `id`              SERIAL,
+    `site_id`         BIGINT UNSIGNED NULL DEFAULT NULL,
+    `type`            VARCHAR(255)    NOT NULL,
+    `params`          JSON,
+    `storage`         JSON,
+    `cron_expression` VARCHAR(255)    NOT NULL DEFAULT '@daily',
+    `enabled`         TINYINT         NOT NULL DEFAULT 1,
+    `last_exit_code`  INT             NOT NULL DEFAULT 0,
+    `last_execution`  DATETIME        NULL,
+    `last_run_end`    DATETIME        NULL,
+    `next_execution`  DATETIME        NOT NULL DEFAULT '2000-01-01 00:00:00',
+    `times_executed`  INT UNSIGNED    NOT NULL DEFAULT 0,
+    `times_failed`    INT UNSIGNED    NOT NULL DEFAULT 0,
+    `locked`          DATETIME        NULL,
+    `priority`        INT             NOT NULL DEFAULT 0,
+    FOREIGN KEY `#__tasks_sites` (`site_id`) REFERENCES `#__sites` (`id`) ON DELETE CASCADE,
+    PRIMARY KEY (`id`)
+)
+    DEFAULT COLLATE utf8mb4_unicode_ci
+    ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+        <action table="#__tasks" canfail="1">
+            <condition type="type" value="params" coltype="longtext" />
+            <query><![CDATA[
+ALTER TABLE `#__tasks`
+    MODIFY COLUMN `params` JSON;
+]]></query>
+        </action>
+
+        <action table="#__tasks" canfail="1">
+            <condition type="type" value="storage" coltype="longtext" />
+            <query><![CDATA[
+ALTER TABLE `#__tasks`
+    MODIFY COLUMN `storage` JSON;
+]]></query>
+        </action>
+
+        <action table="#__tasks" canfail="1">
+            <condition type="missing" value="stuck_retries"/>
+            <query><![CDATA[
+ALTER TABLE `#__tasks`
+    ADD COLUMN `stuck_retries` INT NOT NULL DEFAULT 0 AFTER `priority`;
+]]></query>
+        </action>
+
+        <action table="#__queue" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__queue`
+(
+    `id`    SERIAL,
+    `time`  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `item`  JSON,
+    PRIMARY KEY (`id`)
+) DEFAULT COLLATE utf8mb4_unicode_ci
+  ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+        <action table="#__mailtemplates" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__mailtemplates`
+(
+    `id`    SERIAL,
+    `type`  VARCHAR(255) NOT NULL,
+    `language` VARCHAR(50) NOT NULL DEFAULT '*',
+    `subject` VARCHAR(255) NOT NULL,
+    `html` LONGTEXT,
+    `plaintext` LONGTEXT,
+    INDEX `#__mailtemplates_type` (`type`(60)),
+    PRIMARY KEY (`id`)
+) DEFAULT COLLATE utf8mb4_unicode_ci
+  ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+        <action table="#__mfa" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__mfa`
+(
+    `id`         SERIAL,
+    `user_id`    BIGINT UNSIGNED NOT NULL,
+    `title`      VARCHAR(255)    NOT NULL,
+    `method`     VARCHAR(100)    NOT NULL,
+    `default`    TINYINT(1)      NOT NULL DEFAULT 0,
+    `options`    LONGTEXT        null,
+    `created_on` DATETIME        NULL,
+    `last_used`  DATETIME        NULL,
+    INDEX `#__mfa_user` (`user_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  DEFAULT COLLATE = utf8mb4_unicode_ci;
+            ]]></query>
+        </action>
+
+        <action table="#__passkeys" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__passkeys`
+(
+    `id`         VARCHAR(1000)   NOT NULL COMMENT 'Credential ID',
+    `user_id`    VARCHAR(128)    NOT NULL COMMENT 'User handle',
+    `label`      VARCHAR(255)    NOT NULL COMMENT 'Human readable label',
+    `credential` MEDIUMTEXT      NOT NULL COMMENT 'Attested credential data, JSON format',
+    PRIMARY KEY (`id`(100)),
+    INDEX (`user_id`(100))
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  DEFAULT COLLATE = utf8mb4_unicode_ci;
+            ]]></query>
+        </action>
+
+        <action table="#__groups" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__groups`
+(
+    `id`         SERIAL,
+    `title`      VARCHAR(255) NOT NULL,
+    `privileges` JSON
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  DEFAULT COLLATE = utf8mb4_unicode_ci;
+            ]]></query>
+        </action>
+
+        <action table="#__reports" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__reports` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT,
+    `site_id` BIGINT UNSIGNED NOT NULL,
+    `created_on` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `created_by` BIGINT UNSIGNED NOT NULL DEFAULT '0',
+    `action` ENUM('core_update_found','core_update_installed','ext_update_found','ext_update_installed','backup','filescanner','site_action','misc_action','site_up','site_down') NOT NULL DEFAULT 'misc_action',
+    `context` JSON,
+    UNIQUE KEY `id` (`id`),
+    KEY `#__report_site_acton_index` (`site_id`,`action`),
+    KEY `#__report_site_index` (`site_id`),
+    CONSTRAINT `#__report_sites_fk` FOREIGN KEY (`site_id`) REFERENCES `#__sites` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci;
+            ]]></query>
+        </action>
+
+        <!-- Update the #__reports table -->
+        <action table="#__reports" canfail="1">
+            <condition type="equals" value="0"><![CDATA[
+SELECT COUNT(*) FROM `INFORMATION_SCHEMA`.`COLUMNS`
+WHERE (`COLUMN_NAME` = 'action') AND (`TABLE_NAME` = '#__reports') AND (`TABLE_SCHEMA` = DATABASE())
+  AND `COLUMN_TYPE` LIKE '%\'site_up\'%'
+            ]]></condition>
+            <query><![CDATA[
+ALTER TABLE `#__reports` CHANGE `action` `action` ENUM('core_update_found','core_update_installed','ext_update_found','ext_update_installed','backup','filescanner','site_action','misc_action','site_up','site_down') NOT NULL DEFAULT 'misc_action';
+            ]]></query>
+        </action>
+
+        <action table="#__login_failures" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__login_failures`
+(
+    `ip`      VARBINARY(16),
+    `mark`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+    INDEX `#__login_failures_covering` (`ip`, `mark`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  DEFAULT COLLATE = utf8mb4_unicode_ci;
+            ]]></query>
+        </action>
+
+        <action table="#__login_lockouts" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__login_lockouts`
+(
+    `ip`      VARBINARY(16),
+    `until`   DATETIME NOT NULL,
+    PRIMARY KEY `#__login_lockouts_pk` (`ip`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  DEFAULT COLLATE = utf8mb4_unicode_ci;
+            ]]></query>
+        </action>
+
+        <!-- Install the common CSS -->
+        <action table="#__akeeba_common" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT COUNT(*) FROM `#__akeeba_common` WHERE `key` = 'mail.common_css';
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__akeeba_common` (`key`, `value`) VALUES ('mail.common_css',':root {\r\n    color-scheme: light dark;\r\n}\r\n\r\n/*Reset styles*/\r\nbody {\r\n    font-family: \'Helvetica Neue\', Helvetica, Arial, sans-serif;\r\n    font-size: 12pt;\r\n    margin: 0;\r\n    padding: 0;\r\n    color: #514f4f;\r\n}\r\n\r\n.akemail-outer-wrapper {\r\n    background: #40b5b8;\r\n}\r\n\r\n.akemail-outer-wrapper table {\r\n    width: 100%;\r\n    max-width: 960px;\r\n    margin: 0 auto;\r\n}\r\n\r\n.akemail-wrapper {\r\n    width: 100%;\r\n    height: 100%;\r\n    padding: 1em 0;\r\n}\r\n\r\n.akemail-container {\r\n    background-color: #fff;\r\n    color: #514f4f;\r\n    text-align: left;\r\n    box-shadow: black 0 0 8px;\r\n}\r\n\r\n.akemail-logo {\r\n    background-color: #efefef;\r\n    text-align: right;\r\n    padding: 1em 1em;\r\n    min-height: 40px;\r\n}\r\n\r\n.akemail-logo a {\r\n    border: none;\r\n    text-decoration: none;\r\n}\r\n\r\n.akemail-logo a img {\r\n    max-height: 50px;\r\n    max-width: 200px;\r\n}\r\n\r\n.akemail-hello {\r\n    font-size: 13pt;\r\n    color: #38b5b8;\r\n    padding: 0.5em 1em;\r\n}\r\n\r\n.akemail-main-topic {\r\n    text-align: center;\r\n    font-size: 13pt;\r\n    font-weight: bold;\r\n    color: #e43535;\r\n    padding: 0.5em 1em;\r\n}\r\n\r\n.akemail-message {\r\n    padding: 0.5em 1em;\r\n}\r\n\r\n.akemail-message a {\r\n    color: #38b5b8;\r\n    text-decoration: underline;\r\n}\r\n\r\n.akemail-product-buttons {\r\n    text-align: center;\r\n}\r\n\r\n.akemail-message h4 {\r\n    color: #38b5b8;\r\n    font-size: 13pt;\r\n    border-bottom: thin solid #38b5b8;\r\n}\r\n\r\na.akemail-button {\r\n    display: inline-block;\r\n    text-align: center;\r\n    padding: 20px 55px;\r\n    color: #70a230;\r\n    border: 5px solid #40b5b8;\r\n    margin: 5px;\r\n    box-sizing: border-box;\r\n    background-color: #eaeaea;\r\n    text-decoration: none;\r\n    font-weight: bold;\r\n}\r\n\r\na.akemail-button:hover {\r\n    background-color: #d9d9d9;\r\n}\r\n\r\na.akemail-button img {\r\n    display: block;\r\n    width: 50px;\r\n    margin: 0 auto;\r\n}\r\n\r\n.akemail-announcement-box {\r\n    background: #e43535;\r\n    padding: 0 1em;\r\n    margin: 0 2em;\r\n    color: #fff;\r\n    border-radius: 0.25em;\r\n    border: thin solid #952b2b;\r\n}\r\n\r\n.akemail-announcement-box h3 {\r\n    font-weight: bold;\r\n    font-size: 13pt;\r\n    font-style: italic;\r\n    padding: 0;\r\n    margin: 1em 0 0.5em;\r\n    border-bottom: thin solid #efefef;\r\n}\r\n\r\n.akemail-announcement-note {\r\n    color: #7a7a7a;\r\n    font-size: 10pt;\r\n    line-height: 1.1em;\r\n    margin: 1em 3em 0;\r\n}\r\n\r\n.akemail-announcement-visitlink {\r\n    margin: 1em 1em 0;\r\n}\r\n\r\n.akemail-announcement-visitlink a {\r\n    color: #38b5b8;\r\n    text-decoration: underline;\r\n}\r\n\r\n.akemail-outro {\r\n    color: #514f4f;\r\n    padding: 0 1em 1em;\r\n}\r\n\r\n.akemail-footer {\r\n    display: block;\r\n    text-align: right;\r\n    background: #514f4f;\r\n    color: #fff;\r\n    font-size: 10pt;\r\n    padding: 1px 2em;\r\n}\r\n\r\n.akemail-footer-sitelink a {\r\n    float: left;\r\n    color: #ffffff;\r\n    text-decoration: none;\r\n    border: none;\r\n}\r\n\r\n.akemail-footer-follow img {\r\n    border: none;\r\n    text-decoration: none;\r\n    max-width: 100%;\r\n}\r\n\r\n.akemail-legalinfo {\r\n    text-align: center;\r\n    width: 100%;\r\n    max-width: 960px;\r\n    color: #efefef;\r\n    font-size: 9pt;\r\n    font-weight: normal;\r\n    background-color: rgba(0, 0, 0, 0.2);\r\n    margin: 2em auto;\r\n    padding: 0.5em 0;\r\n}\r\n\r\n.akemail-legalinfo a {\r\n    color: white;\r\n    font-weight: bold;\r\n    text-decoration: underline;\r\n    border: none;\r\n}\r\n\r\n.akemail-legalinfo p {\r\n    margin: 0.3em 1em 0;\r\n}\r\n\r\n@media (prefers-color-scheme: dark) {\r\n    .akemail-outer-wrapper {\r\n        background-color: #274b4e;\r\n    }\r\n\r\n    .akemail-container {\r\n        background-color: #383636;\r\n        color: #efefef;\r\n    }\r\n\r\n    .akemail-logo {\r\n        background-color: #242222;\r\n    }\r\n\r\n    .akemail-main-topic {\r\n        color: #f73535;\r\n    }\r\n\r\n    .akemail-announcement-box {\r\n        background: #712121;\r\n        color: #efefef;\r\n    }\r\n\r\n    .akemail-announcement-box h3 {\r\n        border-bottom: thin solid #f73535;\r\n    }\r\n\r\n    .akemail-announcement-note {\r\n        color: #adadad;\r\n    }\r\n\r\n    .akemail-outro {\r\n        color: #3ea1a4;\r\n    }\r\n\r\n    .akemail-footer {\r\n        background-color: #242222;\r\n    }\r\n}');
+]]></query>
+        </action>
+
+        <!-- Install the default Terms of Service -->
+        <action table="#__akeeba_common" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT COUNT(*) FROM `#__akeeba_common` WHERE `key` = 'tos.en-GB';
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__akeeba_common` (`key`, `value`) VALUES ('tos.en-GB','<h1>Terms of Service</h1>\r\n<p>Welcome to our site monitoring service. By using this service, you agree to the following terms and conditions. Please read them carefully.</p>\r\n\r\n<h2>1. Acceptance of Terms</h2>\r\n<p>By accessing or using this service, you agree to be bound by these Terms of Service. If you do not agree with any part of these terms, you must not use this service.</p>\r\n\r\n<h2>2. Description of Service</h2>\r\n<p>This service provides remote monitoring and management capabilities for websites. The service may include, but is not limited to, uptime monitoring, update management, backup scheduling, and security scanning of registered websites.</p>\r\n\r\n<h2>3. User Accounts</h2>\r\n<p>You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account. You agree to notify the administrator immediately of any unauthorised use of your account.</p>\r\n\r\n<h2>4. Acceptable Use</h2>\r\n<p>You agree to use this service only for lawful purposes and in accordance with these Terms. You agree not to use this service to monitor websites you do not own or have explicit authorisation to manage.</p>\r\n\r\n<h2>5. Data and Privacy</h2>\r\n<p>Your use of this service is also governed by our Privacy Policy. Please review our Privacy Policy to understand our practices regarding your personal data.</p>\r\n\r\n<h2>6. Service Availability</h2>\r\n<p>We strive to maintain the availability of this service but do not guarantee uninterrupted or error-free operation. The service may be temporarily unavailable due to maintenance, updates, or circumstances beyond our control.</p>\r\n\r\n<h2>7. Limitation of Liability</h2>\r\n<p>This service is provided &ldquo;as is&rdquo; without warranties of any kind, either express or implied. We shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of this service.</p>\r\n\r\n<h2>8. Changes to Terms</h2>\r\n<p>We reserve the right to modify these Terms of Service at any time. Changes will be effective immediately upon posting. Your continued use of the service after changes are posted constitutes your acceptance of the revised terms.</p>\r\n\r\n<h2>9. Account Termination</h2>\r\n<p>We reserve the right to suspend or terminate your account at any time for violation of these Terms or for any other reason at our sole discretion.</p>\r\n\r\n<h2>10. Contact</h2>\r\n<p>If you have any questions about these Terms of Service, please contact the site administrator.</p>\r\n\r\n<p><em>These are the default Terms of Service. The site administrator should customise this document to reflect the specific terms applicable to this installation.</em></p>');
+]]></query>
+        </action>
+
+        <!-- Install the default Privacy Policy -->
+        <action table="#__akeeba_common" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT COUNT(*) FROM `#__akeeba_common` WHERE `key` = 'privacy.en-GB';
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__akeeba_common` (`key`, `value`) VALUES ('privacy.en-GB','<h1>Privacy Policy</h1>\r\n<p>This Privacy Policy describes how we collect, use, store, and protect your personal information when you use this site monitoring service.</p>\r\n\r\n<h2>1. Data Controller</h2>\r\n<p>The data controller for this installation is the site administrator. Please contact the site administrator for any data protection enquiries.</p>\r\n\r\n<h2>2. Personal Data We Collect</h2>\r\n<p>We collect and process the following personal data:</p>\r\n<ul>\r\n<li><strong>Account information</strong>: username, full name, and email address provided during registration.</li>\r\n<li><strong>Authentication data</strong>: encrypted password, multi-factor authentication method titles (not secrets), and passkey labels.</li>\r\n<li><strong>Usage data</strong>: session information, login timestamps, and consent records.</li>\r\n<li><strong>Site management data</strong>: information about websites you register for monitoring, including site URLs, connection credentials, and monitoring results.</li>\r\n</ul>\r\n\r\n<h2>3. Purpose of Processing</h2>\r\n<p>Your personal data is processed for the following purposes:</p>\r\n<ul>\r\n<li>Providing and maintaining the site monitoring service.</li>\r\n<li>Authenticating your identity and securing your account.</li>\r\n<li>Sending notifications about monitored sites (updates, backups, security issues).</li>\r\n<li>Communicating service-related information.</li>\r\n</ul>\r\n\r\n<h2>4. Legal Basis for Processing</h2>\r\n<p>We process your data based on:</p>\r\n<ul>\r\n<li><strong>Consent</strong>: you have given consent to the processing of your personal data for one or more specific purposes.</li>\r\n<li><strong>Legitimate interest</strong>: processing is necessary for the legitimate interests of operating this service.</li>\r\n</ul>\r\n\r\n<h2>5. Data Retention</h2>\r\n<p>Your personal data is retained for as long as your account remains active. Upon account deletion, your personal data will be permanently removed from the system. Backup copies may be retained for a limited period in accordance with our backup retention policy.</p>\r\n\r\n<h2>6. Data Sharing</h2>\r\n<p>We do not sell, trade, or otherwise transfer your personal data to third parties. Data may only be shared when required by law or to protect the security of the service.</p>\r\n\r\n<h2>7. Your Rights</h2>\r\n<p>Under applicable data protection legislation (including the GDPR), you have the following rights:</p>\r\n<ul>\r\n<li><strong>Right of access</strong>: you can request a copy of your personal data at any time using the data export feature.</li>\r\n<li><strong>Right to rectification</strong>: you can update your personal information through your user profile.</li>\r\n<li><strong>Right to erasure</strong>: you can request deletion of your account and all associated data using the account deletion feature.</li>\r\n<li><strong>Right to data portability</strong>: you can export your data in a machine-readable format (XML).</li>\r\n<li><strong>Right to withdraw consent</strong>: you can withdraw your consent at any time by declining the Terms of Service.</li>\r\n</ul>\r\n\r\n<h2>8. Data Security</h2>\r\n<p>We implement appropriate technical and organisational measures to protect your personal data, including encrypted password storage, multi-factor authentication support, and secure session management.</p>\r\n\r\n<h2>9. Cookies and Sessions</h2>\r\n<p>This service uses session cookies essential for the operation of the application. These cookies are strictly necessary and do not require separate consent.</p>\r\n\r\n<h2>10. Changes to This Policy</h2>\r\n<p>We may update this Privacy Policy from time to time. Any changes will be posted on this page. If significant changes are made, you may be asked to re-consent.</p>\r\n\r\n<h2>11. Contact</h2>\r\n<p>For any questions regarding this Privacy Policy or to exercise your data protection rights, please contact the site administrator.</p>\r\n\r\n<p><em>This is the default Privacy Policy. The site administrator should customise this document to reflect the specific data protection practices applicable to this installation.</em></p>');
+]]></query>
+        </action>
+
+        <!-- Install mail template: joomlaupdate_found -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'joomlaupdate_found') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+('joomlaupdate_found','*','⚠️ Joomla!™ [NEW_VERSION] is available on “[SITE_NAME]”','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>Joomla!&trade; [NEW_VERSION] is available on &ldquo;[SITE_NAME]&rdquo;</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>Joomla! version [NEW_VERSION] is now available for installation on your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo;. Your site is currently running the older version [OLD_VERSION].</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\"akemail-announcement\">\r\n<div class=\"akemail-announcement-box\">\r\n<h3>Action required</h3>\r\n<p>The new version will <strong>NOT</strong> be installed automatically. You will have to install it yourself.</p>\r\n</div>\r\n<p class=\"akemail-announcement-note\"><em>Note</em>: Akeeba Panopticon can be configured to install new Joomla! versions automatically.</p>\r\n<p class=\"akemail-announcement-visitlink\">You can install the new Joomla! version either from your site\'s administrator page, or through the main control panel of <a href=\"[URL]\">your Akeeba Panopticon installation</a>.</p>\r\n</div>\r\n<!-- Bye, Bye -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nJoomla!™ [NEW_VERSION] is available on “[SITE_NAME]”\r\n\r\n\r\nJoomla! version [NEW_VERSION] is now available for installation on\r\nyour site “[SITE_NAME] [/[SITE_URL]]”. Your site is currently\r\nrunning the older version [OLD_VERSION].\r\n\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nThe new version will NOT be installed automatically. You will have to\r\ninstall it yourself.\r\n\r\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n\r\nNote: Akeeba Panopticon can be configured to install new Joomla!\r\nversions automatically.\r\n\r\n==============================================================================\r\n\r\n\r\nYou can install the new Joomla! version either from your site\'s\r\nadministrator page, or through the main control panel of your Akeeba\r\nPanopticon installation ([URL]).\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: joomlaupdate_installed -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'joomlaupdate_installed') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+('joomlaupdate_installed','*','Joomla!™ has been updated to [NEW_VERSION] on “[SITE_NAME]”','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>Joomla!&trade; has been updated to [NEW_VERSION] on &ldquo;[SITE_NAME]&rdquo;</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>Joomla! version [NEW_VERSION] was installed on your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo;. Before this change, your site was running the older version [OLD_VERSION].</p>\r\n<p>No further action is required on your part.</p>\r\n</div>\r\n<!-- Area Offer/Announcement --><!-- Bye, Bye -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nJoomla!™ has been updated to [NEW_VERSION] on “[SITE_NAME]”\r\n\r\nJoomla! version [NEW_VERSION] was installed on your site “[SITE_NAME]”. Before\r\nthis change, your site was running the older version [OLD_VERSION].\r\n\r\nNo further action is required on your part.\r\n\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Migrate mail template: joomlaupdate_failed — add LOG_URL section -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(COALESCE(LOCATE('[LOG_URL]', `html`), 0) > 0, 1, 0) AS `condition` FROM `#__mailtemplates` WHERE `type` = 'joomlaupdate_failed' AND `language` = '*'
+            ]]></condition>
+            <query><![CDATA[
+UPDATE `#__mailtemplates`
+SET
+    `html`      = REPLACE(`html`,
+        '<p>[MESSAGE]</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->',
+        '<p>[MESSAGE]</p>\r\n</div>\r\n<div class=\"akemail-message\">\r\n<p>The complete task log can be reviewed in <a href=\"[LOG_URL]\">Akeeba Panopticon</a>. The log file may also be attached to this email.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->'
+    ),
+    `plaintext` = REPLACE(`plaintext`,
+        '[MESSAGE]\r\n\r\n\r\n==',
+        '[MESSAGE]\r\n\r\nThe complete task log can be reviewed at:\r\n[LOG_URL]\r\nThe log file may also be attached to this email.\r\n\r\n\r\n=='
+    )
+WHERE `type` = 'joomlaupdate_failed' AND `language` = '*'
+]]></query>
+        </action>
+
+        <!-- Install mail template: joomlaupdate_failed -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'joomlaupdate_failed') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+('joomlaupdate_failed','*','🚨 Unable to upgrade “[SITE_NAME]” to Joomla!™ [NEW_VERSION]','<div class=\”akemail-outer-wrapper\”>\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\”10%\”>&nbsp;</td>\r\n<td>\r\n<div class=\”akemail-wrapper\”>\r\n<div class=\”akemail-container\”><!-- Logo Header -->\r\n<div class=\”akemail-logo\”><a href=\”[URL]\”>&nbsp;<img src=\”[URL]/media/images/logo_bw_64.png\” alt=\”Panopticon &mdash; Site Monitoring\”>&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\”akemail-hello\”>\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\”akemail-main-topic\”>\r\n<p>Unable to upgrade &ldquo;[SITE_NAME]&rdquo; to Joomla!&trade; [NEW_VERSION]</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\”akemail-message\”>\r\n<p>Panopticon was unable to install the new Joomla! version [NEW_VERSION] on your site &ldquo;<a href=\”[SITE_URL]\”>[SITE_NAME]</a>&rdquo;. The error received is as follows:</p>\r\n<p>[MESSAGE]</p>\r\n</div>\r\n<div class=\”akemail-message\”>\r\n<p>The complete task log can be reviewed in <a href=\”[LOG_URL]\”>Akeeba Panopticon</a>. The log file may also be attached to this email.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\”akemail-announcement\”>\r\n<div class=\”akemail-announcement-box\”>\r\n<h3>Action required</h3>\r\n<p>The new version will <strong>NOT</strong> be installed automatically. You will have to install it yourself.</p>\r\n</div>\r\n<p class=\”akemail-announcement-visitlink\”>You can install the new Joomla! version either from your site\'s administrator page, or through the main control panel of <a href=\”[URL]\”>your Akeeba Panopticon installation</a>.</p>\r\n</div>\r\n<!-- Bye, Bye -->\r\n<div class=\”akemail-outro\”>\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\”akemail-footer\”>\r\n<p class=\”akemail-footer-sitelink\”>&nbsp;<a href=\”[URL]\”>Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\”akemail-legalinfo\”>\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\”10%\”>&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nUnable to upgrade “[SITE_NAME]” to Joomla!™ [NEW_VERSION]\r\n\r\n\r\nPanopticon was unable to install the new Joomla! version [NEW_VERSION] on \r\nyour site “[SITE_NAME]”. The error received is as follows:\r\n\r\n\r\n[MESSAGE]\r\n\r\nThe complete task log can be reviewed at:\r\n[LOG_URL]\r\nThe log file may also be attached to this email.\r\n\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nThe new version will NOT be installed automatically. You will have to\r\ninstall it yourself.\r\n\r\n==============================================================================\r\n\r\n\r\nYou can install the new Joomla! version either from your site\'s\r\nadministrator page, or through the main control panel of your Akeeba\r\nPanopticon installation ([URL]).\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: akeebabackup_success -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'akeebabackup_success') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`) VALUES ('akeebabackup_success', '*', 'Successful backup on “[SITE_NAME]”', '<div class="akemail-outer-wrapper">
+<table>
+<tbody>
+<tr>
+<td width="10%">&nbsp;</td>
+<td>
+<div class="akemail-wrapper">
+<div class="akemail-container"><!-- Logo Header -->
+<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>
+<!-- Hello -->
+<div class="akemail-hello">
+<p>Hello,</p>
+</div>
+<!-- Main-Topic -->
+<div class="akemail-main-topic">
+<p>A backup on &ldquo;[SITE_NAME]&rdquo; completed successfully</p>
+</div>
+<!-- Message -->
+<div class="akemail-message">
+<p>The backup on &ldquo;[SITE_NAME]&rdquo; with profile #[PROFILE_ID] has completed successfully.</p>
+<p>No further action is required on your part.</p>
+</div>
+<!-- Area Offer/Announcement --><!-- Bye, Bye -->
+<div class="akemail-outro">
+<p>Have a great day!</p>
+</div>
+<!-- Footer -->
+<div class="akemail-footer">
+<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>
+</div>
+</div>
+<!-- Legal info -->
+<div class="akemail-legalinfo">
+<p>This is an automated email. Please do not reply to it.</p>
+</div>
+</div>
+</td>
+<td width="10%">&nbsp;</td>
+</tr>
+</tbody>
+</table>
+</div>', 'Hello,
+
+
+A backup on “[SITE_NAME]” completed successfully
+
+
+The backup on “[SITE_NAME]” with profile #[PROFILE_ID] has
+completed successfully.
+
+No further action is required on your part.
+
+
+Have a great day!
+
+------------------------------------------------------------------------------
+
+This email was sent by the Panopticon installation on [URL]
+This is an automated email. Please do not reply to it.')
+]]></query>
+        </action>
+
+        <!-- Install mail template: akeebabackup_fail -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'akeebabackup_fail') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`) VALUES ('akeebabackup_fail', '*', 'Failed backup on “[SITE_NAME]”', '<div class="akemail-outer-wrapper">
+            <table>
+                <tbody>
+                    <tr>
+                        <td width="10%">&nbsp;</td>
+                        <td>
+                            <div class="akemail-wrapper">
+                                <div class="akemail-container"><!-- Logo Header -->
+                                    <div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>
+                                    <!-- Hello -->
+                                    <div class="akemail-hello">
+                                        <p>Hello,</p>
+                                    </div>
+                                    <!-- Main-Topic -->
+                                    <div class="akemail-main-topic">
+                                        <p>A backup on &ldquo;[SITE_NAME]&rdquo; failed to complete.</p>
+                                    </div>
+                                    <!-- Message -->
+                                    <div class="akemail-message">
+                                        <p>The backup on &ldquo;[SITE_NAME]&rdquo; with profile #[PROFILE_ID] failed to complete. The error received is:</p>
+                                        <p>[MESSAGE]</p>
+                                    </div>
+                                    <!-- Area Offer/Announcement --><!-- Bye, Bye -->
+                                    <div class="akemail-outro">
+                                        <p>Have a great day!</p>
+                                    </div>
+                                    <!-- Footer -->
+                                    <div class="akemail-footer">
+                                        <p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>
+                                    </div>
+                                </div>
+                                <!-- Legal info -->
+                                <div class="akemail-legalinfo">
+                                    <p>This is an automated email. Please do not reply to it.</p>
+                                </div>
+                            </div>
+                        </td>
+                        <td width="10%">&nbsp;</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>', 'Hello,
+
+
+            A backup on “[SITE_NAME]” failed to complete.
+
+
+            The backup on “[SITE_NAME]” with profile #[PROFILE_ID] failed to complete.
+            The error received is:
+
+            [MESSAGE]
+
+
+            Have a great day!
+
+            ------------------------------------------------------------------------------
+
+            This email was sent by the Panopticon installation on [URL]
+            This is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: extensions_update_done -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'extensions_update_done') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO panopticon.#__mailtemplates (type, language, subject, html, plaintext) VALUES ('extensions_update_done', '*', 'Automatic extension updates on [SITE_NAME]', '<div class="akemail-outer-wrapper">\n<table>\n<tbody>\n<tr>\n<td width="10%">&nbsp;</td>\n<td>\n<div class="akemail-wrapper">\n<div class="akemail-container"><!-- Logo Header -->\n<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>\n<!-- Hello -->\n<div class="akemail-hello">\n<p>Hello,</p>\n</div>\n[RENDERED_HTML] <!-- Bye, Bye -->\n<div class="akemail-outro">\n<p>Have a great day!</p>\n</div>\n<!-- Footer -->\n<div class="akemail-footer">\n<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>\n</div>\n</div>\n<!-- Legal info -->\n<div class="akemail-legalinfo">\n<p>This is an automated email. Please do not reply to it.</p>\n</div>\n</div>\n</td>\n<td width="10%">&nbsp;</td>\n</tr>\n</tbody>\n</table>\n</div>', 'Hello,\n\n\n[RENDERED_TEXT]\n\n\nHave a great day!\n\n------------------------------------------------------------------------------\n\nThis email was sent by the Panopticon installation on [URL]\nThis is an automated email. Please do not reply to it.')
+]]></query>
+            <query><![CDATA[
+INSERT INTO panopticon.#__mailtemplates (type, language, subject, html, plaintext) VALUES ('extension_update_found', '*', '⚠️ [EXTENSION_NAME] [NEW_VERSION] is available for installation on “[SITE_NAME]”', '<div class="akemail-outer-wrapper">\n<table>\n<tbody>\n<tr>\n<td width="10%">&nbsp;</td>\n<td>\n<div class="akemail-wrapper">\n<div class="akemail-container"><!-- Logo Header -->\n<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>\n<!-- Hello -->\n<div class="akemail-hello">\n<p>Hello,</p>\n</div>\n<!-- Main-Topic -->\n<div class="akemail-main-topic">\n<p>[EXTENSION_NAME] [NEW_VERSION] is available on &ldquo;[SITE_NAME]&rdquo;</p>\n</div>\n<!-- Message -->\n<div class="akemail-message">\n<p>[EXTENSION_NAME] version [NEW_VERSION] is now available for installation on your site &ldquo;<a href="[SITE_URL]">[SITE_NAME]</a>&rdquo;. Your site is currently running the older version [OLD_VERSION].</p>\n</div>\n<!-- Area Offer/Announcement -->\n<div class="akemail-announcement">\n<div class="akemail-announcement-box">\n<h3>Action required</h3>\n<p>The new version will <strong>NOT</strong> be installed automatically. You will have to install it yourself.</p>\n</div>\n<p class="akemail-announcement-note"><em>Note</em>: Akeeba Panopticon can be configured to install new versions of [EXTENSION_NAME] automatically.</p>\n<p class="akemail-announcement-visitlink">You can install the new [EXTENSION_NAME] version either from your site\'s administrator page, or through the main control panel of <a href="[URL]">your Akeeba Panopticon installation</a>.</p>\n</div>\n<!-- Bye, Bye -->\n<div class="akemail-outro">\n<p>Have a great day!</p>\n</div>\n<!-- Footer -->\n<div class="akemail-footer">\n<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>\n</div>\n</div>\n<!-- Legal info -->\n<div class="akemail-legalinfo">\n<p>This is an automated email. Please do not reply to it.</p>\n</div>\n</div>\n</td>\n<td width="10%">&nbsp;</td>\n</tr>\n</tbody>\n</table>\n</div>', 'Hello,\n\n\n[EXTENSION_NAME] [NEW_VERSION] is available on “[SITE_NAME]”\n\n\n[EXTENSION_NAME] version [NEW_VERSION] is now available for installation on\nyour site “[SITE_NAME] [SITE_URL]”. Your site is currently\nrunning the older version [OLD_VERSION].\n\n\n==============================================================================\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\n==============================================================================\n\nThe new version will NOT be installed automatically. You will have to\ninstall it yourself.\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\nNote: Akeeba Panopticon can be configured to install new versions of\n[EXTENSION_NAME] automatically.\n\n==============================================================================\n\n\nYou can install the new [EXTENSION_NAME] version either from\nyour site\'s administrator page, or through the main control panel of your\nAkeeba Panopticon installation ([URL]).\n\nHave a great day!\n\n------------------------------------------------------------------------------\n\nThis email was sent by the Panopticon installation on [URL].\nThis is an automated email. Please do not reply to it.\n')
+]]></query>
+        </action>
+
+        <!-- Install mail template: selfupdate_found -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'selfupdate_found') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO panopticon.#__mailtemplates (type, language, subject, html, plaintext) VALUES ('selfupdate_found', '*', '✨ Panopticon [NEW_VERSION] is now available', '<div class="akemail-outer-wrapper">\n	<table>\n		<tbody>\n		<tr>\n			<td width="10%">&nbsp;</td>\n			<td>\n				<div class="akemail-wrapper">\n					<div class="akemail-container"><!-- Logo Header -->\n						<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>\n						<!-- Hello -->\n						<div class="akemail-hello">\n							<p>Hello,</p>\n						</div>\n						<!-- Main-Topic -->\n						<div class="akemail-main-topic">\n							<p>Akeeba Panopticon [NEW_VERSION] is available</p>\n						</div>\n						<!-- Message -->\n						<div class="akemail-message">\n							<p>Akeeba Panopticon version [NEW_VERSION] is now available for installation. You are currently running the older version [OLD_VERSION].</p>\n						</div>\n						<!-- Area Offer/Announcement -->\n						<div class="akemail-announcement">\n							<div class="akemail-announcement-box">\n								<h3>Action required</h3>\n								<p>Panopticon does not update itself automatically. It\'s up to you to choose when is the best time to update it.</p>\n							</div>\n						</div>\n						<!-- Bye, Bye -->\n						<div class="akemail-outro">\n							<p>Have a great day!</p>\n						</div>\n						<!-- Footer -->\n						<div class="akemail-footer">\n							<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>\n						</div>\n					</div>\n					<!-- Legal info -->\n					<div class="akemail-legalinfo">\n						<p>This is an automated email. Please do not reply to it.</p>\n					</div>\n				</div>\n			</td>\n			<td width="10%">&nbsp;</td>\n		</tr>\n		</tbody>\n	</table>\n</div>', 'Hello,\n\n\nAkeeba Panopticon [NEW_VERSION] is available\n\n\nAkeeba Panopticon version [NEW_VERSION] is now available for installation. \nYou are currently running the older version [OLD_VERSION].\n\n==============================================================================\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\n==============================================================================\n\nPanopticon does not update itself automatically. It\'s up to you to choose when\nis the best time to update it.\n\n==============================================================================\n\nHave a great day!\n\n------------------------------------------------------------------------------\n\nThis email was sent by the Panopticon installation on [URL].\nThis is an automated email. Please do not reply to it.\n');
+]]></query>
+        </action>
+
+        <!-- Install mail template: scheduled_update_summary -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'scheduled_update_summary') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+	('scheduled_update_summary', '*', 'Updates summary for [SITE_NAME]', '<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n[RENDERED_HTML] <!-- Bye, Bye -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>', 'Hello,\r\n\r\n\r\n[RENDERED_TEXT]\r\n\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL]\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: ssl_tls_expiring -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'ssl_tls_expiring') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+	('ssl_tls_expiring', '*', '⚠️ The SSL/TLS certificate for [SITE_NAME] expires soon', '<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>The SSL/TLS certificate for &ldquo;[SITE_NAME]&rdquo; expires soon</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>The SSL/TLS (HTTPS) certificate for your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo; will expire soon, on [DATE]. Please install a new certificate to prevent connectivity problems to your site.</p>\r\n<p><strong>ℹ️ Kind reminder</strong>: If you let your certificate expire, web browsers will report your site as &ldquo;untrusted&rdquo;. Some browsers may prevent your site\'s visitors from accessing your site completely.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\"akemail-announcement\">\r\n<div class=\"akemail-announcement-box\">\r\n<h3>Action required</h3>\r\n<p>You need to install a new SSL/TLS certificate on your site.</p>\r\n</div>\r\n<p class=\"akemail-announcement-note\"><em>Note</em>: Akeeba Panopticon cannot install or update SSL/TLS certificates. This is something you need to do from your hosting control panel.</p>\r\n</div>\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>', 'Hello,\r\n\r\n\r\nThe SSL/TLS certificate for “[SITE_NAME]” expires soon\r\n\r\n\r\nThe SSL/TLS (HTTPS) certificate for your site “[SITE_NAME]”\r\nat [SITE_URL]” will expire soon, on [DATE]. Please install a new\r\ncertificate to prevent connectivity problems to your site.\r\n\r\nℹ️ KIND REMINDER: If you let your certificate expire, web browsers\r\nwill report your site as “untrusted”. Some browsers may prevent\r\nyour site\'s visitors from accessing your site completely.\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nYou need to install a new SSL/TLS certificate on your site.\r\n\r\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n\r\n_Note_: Akeeba Panopticon cannot install or update SSL/TLS\r\ncertificates. This is something you need to do from your hosting\r\ncontrol panel.\r\n\r\n==============================================================================\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL]\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: site_down -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'site_down') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+	('site_down','*','😱 [SITE_NAME] is down','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>The site &ldquo;[SITE_NAME]&rdquo; is down</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>Panopticon has detected that your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo; appears to be inaccessible (site down). Please check whether there is a problem on your site, or your hosting provider.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\"akemail-announcement\">\r\n<div class=\"akemail-announcement-box\">\r\n<h3>Action required</h3>\r\n<p>You need to check why your site is inaccessible.</p>\r\n</div>\r\n</div>\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nThe site “[SITE_NAME]” is down\r\n\r\n\r\nPanopticon has detected that your site “[SITE_NAME]”\r\n([SITE_URL]) appears\r\nto be inaccessible (site down). Please check whether there is a problem on\r\nyour site, or your hosting provider.\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nYou need to check why your site is inaccessible.\r\n\r\n==============================================================================\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL]\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: site_up -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'site_up') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+('site_up','*','🥳 [SITE_NAME] is back up','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>The site &ldquo;[SITE_NAME]&rdquo; is back up</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>Panopticon has detected that your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo; appears to be accessible once again (the site is up).</p>\r\n<p>We would like to remind you that the site was inaccessible since [DOWNTIME_START] for [DOWNTIME_HUMAN].</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nThe site “[SITE_NAME]” is down\r\n\r\n\r\nPanopticon has detected that your site “[SITE_NAME]”\r\n([SITE_URL]) appears to be accessible once again\r\n(the site is up).\r\n\r\nWe would like to remind you that the site was inaccessible since\r\n[DOWNTIME_START] for [DOWNTIME_HUMAN].\r\n\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL]\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: action_summary -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'action_summary') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+('action_summary', '*', 'Site action summary for [SITE_NAME]', '<div class="akemail-outer-wrapper">\n<table>\n<tbody>\n<tr>\n<td width="10%">&nbsp;</td>\n<td>\n<div class="akemail-wrapper">\n<div class="akemail-container"><!-- Logo Header -->\n<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>\n<!-- Hello -->\n<div class="akemail-hello">\n<p>Hello,</p>\n</div>\n[RENDERED_HTML] <!-- Bye, Bye -->\n<div class="akemail-outro">\n<p>Have a great day!</p>\n</div>\n<!-- Footer -->\n<div class="akemail-footer">\n<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>\n</div>\n</div>\n<!-- Legal info -->\n<div class="akemail-legalinfo">\n<p>This is an automated email. Please do not reply to it.</p>\n</div>\n</div>\n</td>\n<td width="10%">&nbsp;</td>\n</tr>\n</tbody>\n</table>\n</div>', 'Hello,\n\n\n[RENDERED_TEXT]\n\n\nHave a great day!\n\n------------------------------------------------------------------------------\n\nThis email was sent by the Panopticon installation on [URL]\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+
+        <!-- Install mail template: wordpressupdate_found -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'wordpressupdate_found') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+    ('wordpressupdate_found','*','⚠️ WordPress [NEW_VERSION] is available on “[SITE_NAME]”','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>WordPress [NEW_VERSION] is available on &ldquo;[SITE_NAME]&rdquo;</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>WordPress version [NEW_VERSION] is now available for installation on your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo;. Your site is currently running the older version [OLD_VERSION].</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\"akemail-announcement\">\r\n<div class=\"akemail-announcement-box\">\r\n<h3>Action required</h3>\r\n<p>The new version will <strong>NOT</strong> be installed automatically. You will have to install it yourself.</p>\r\n</div>\r\n<p class=\"akemail-announcement-note\"><em>Note</em>: Akeeba Panopticon can be configured to install new WordPress versions automatically.</p>\r\n<p class=\"akemail-announcement-visitlink\">You can install the new WordPress version either from your site\'s administrator page, or through the main control panel of <a href=\"[URL]\">your Akeeba Panopticon installation</a>.</p>\r\n</div>\r\n<!-- Bye, Bye -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nWordPress [NEW_VERSION] is available on “[SITE_NAME]”\r\n\r\n\r\nWordPress version [NEW_VERSION] is now available for installation on\r\nyour site “[SITE_NAME] [/[SITE_URL]]”. Your site is currently\r\nrunning the older version [OLD_VERSION].\r\n\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nThe new version will NOT be installed automatically. You will have to\r\ninstall it yourself.\r\n\r\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n\r\nNote: Akeeba Panopticon can be configured to install new WordPress\r\nversions automatically.\r\n\r\n==============================================================================\r\n\r\n\r\nYou can install the new WordPress version either from your site\'s\r\nadministrator page, or through the main control panel of your Akeeba\r\nPanopticon installation ([URL]).\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: wordpressupdate_installed -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'wordpressupdate_installed') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+    ('wordpressupdate_installed','*','WordPress has been updated to [NEW_VERSION] on “[SITE_NAME]”','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>WordPress has been updated to [NEW_VERSION] on &ldquo;[SITE_NAME]&rdquo;</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>WordPress version [NEW_VERSION] was installed on your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo;. Before this change, your site was running the older version [OLD_VERSION].</p>\r\n<p>No further action is required on your part.</p>\r\n</div>\r\n<!-- Area Offer/Announcement --><!-- Bye, Bye -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nWordPress has been updated to [NEW_VERSION] on “[SITE_NAME]”\r\n\r\nWordPress version [NEW_VERSION] was installed on your site “[SITE_NAME]”. Before\r\nthis change, your site was running the older version [OLD_VERSION].\r\n\r\nNo further action is required on your part.\r\n\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Migrate mail template: wordpressupdate_failed — add LOG_URL section -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(COALESCE(LOCATE('[LOG_URL]', `html`), 0) > 0, 1, 0) AS `condition` FROM `#__mailtemplates` WHERE `type` = 'wordpressupdate_failed' AND `language` = '*'
+            ]]></condition>
+            <query><![CDATA[
+UPDATE `#__mailtemplates`
+SET
+    `html`      = REPLACE(`html`,
+        '<p>[MESSAGE]</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->',
+        '<p>[MESSAGE]</p>\r\n</div>\r\n<div class=\"akemail-message\">\r\n<p>The complete task log can be reviewed in <a href=\"[LOG_URL]\">Akeeba Panopticon</a>. The log file may also be attached to this email.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->'
+    ),
+    `plaintext` = REPLACE(`plaintext`,
+        '[MESSAGE]\r\n\r\n\r\n==',
+        '[MESSAGE]\r\n\r\nThe complete task log can be reviewed at:\r\n[LOG_URL]\r\nThe log file may also be attached to this email.\r\n\r\n\r\n=='
+    )
+WHERE `type` = 'wordpressupdate_failed' AND `language` = '*'
+]]></query>
+        </action>
+
+        <!-- Install mail template: wordpressupdate_failed -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'wordpressupdate_failed') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+    ('wordpressupdate_failed','*','🚨 Unable to upgrade “[SITE_NAME]” to WordPress [NEW_VERSION]','<div class=\”akemail-outer-wrapper\”>\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\”10%\”>&nbsp;</td>\r\n<td>\r\n<div class=\”akemail-wrapper\”>\r\n<div class=\”akemail-container\”><!-- Logo Header -->\r\n<div class=\”akemail-logo\”><a href=\”[URL]\”>&nbsp;<img src=\”[URL]/media/images/logo_bw_64.png\” alt=\”Panopticon &mdash; Site Monitoring\”>&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\”akemail-hello\”>\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\”akemail-main-topic\”>\r\n<p>Unable to upgrade &ldquo;[SITE_NAME]&rdquo; to WordPress [NEW_VERSION]</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\”akemail-message\”>\r\n<p>Panopticon was unable to install the new WordPress version [NEW_VERSION] on your site &ldquo;<a href=\”[SITE_URL]\”>[SITE_NAME]</a>&rdquo;. The error received is as follows:</p>\r\n<p>[MESSAGE]</p>\r\n</div>\r\n<div class=\”akemail-message\”>\r\n<p>The complete task log can be reviewed in <a href=\”[LOG_URL]\”>Akeeba Panopticon</a>. The log file may also be attached to this email.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\”akemail-announcement\”>\r\n<div class=\”akemail-announcement-box\”>\r\n<h3>Action required</h3>\r\n<p>The new version will <strong>NOT</strong> be installed automatically. You will have to install it yourself.</p>\r\n</div>\r\n<p class=\”akemail-announcement-visitlink\”>You can install the new WordPress version either from your site\'s administrator page, or through the main control panel of <a href=\”[URL]\”>your Akeeba Panopticon installation</a>.</p>\r\n</div>\r\n<!-- Bye, Bye -->\r\n<div class=\”akemail-outro\”>\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\”akemail-footer\”>\r\n<p class=\”akemail-footer-sitelink\”>&nbsp;<a href=\”[URL]\”>Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\”akemail-legalinfo\”>\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\”10%\”>&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nUnable to upgrade “[SITE_NAME]” to WordPress [NEW_VERSION]\r\n\r\n\r\nPanopticon was unable to install the new WordPress version [NEW_VERSION] on \r\nyour site “[SITE_NAME]”. The error received is as follows:\r\n\r\n\r\n[MESSAGE]\r\n\r\nThe complete task log can be reviewed at:\r\n[LOG_URL]\r\nThe log file may also be attached to this email.\r\n\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nThe new version will NOT be installed automatically. You will have to\r\ninstall it yourself.\r\n\r\n==============================================================================\r\n\r\n\r\nYou can install the new WordPress version either from your site\'s\r\nadministrator page, or through the main control panel of your Akeeba\r\nPanopticon installation ([URL]).\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: plugin_update_found -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'plugin_update_found') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+    ('plugin_update_found', '*', '⚠️ [SOFTWARE_NAME] [NEW_VERSION] is available for installation on “[SITE_NAME]”', '<div class="akemail-outer-wrapper">
+<table>
+<tbody>
+<tr>
+<td width="10%">&nbsp;</td>
+<td>
+<div class="akemail-wrapper">
+<div class="akemail-container"><!-- Logo Header -->
+<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>
+<!-- Hello -->
+<div class="akemail-hello">
+<p>Hello,</p>
+</div>
+<!-- Main-Topic -->
+<div class="akemail-main-topic">
+<p>[SOFTWARE_NAME] [NEW_VERSION] is available on &ldquo;[SITE_NAME]&rdquo;</p>
+</div>
+<!-- Message -->
+<div class="akemail-message">
+<p>[SOFTWARE_NAME] version [NEW_VERSION] is now available for installation on your site &ldquo;<a href="[SITE_URL]">[SITE_NAME]</a>&rdquo;. Your site is currently running the older version [OLD_VERSION].</p>
+</div>
+<!-- Area Offer/Announcement -->
+<div class="akemail-announcement">
+<div class="akemail-announcement-box">
+<h3>Action required</h3>
+<p>The new version will <strong>NOT</strong> be installed automatically. You will have to install it yourself.</p>
+</div>
+<p class="akemail-announcement-note"><em>Note</em>: Akeeba Panopticon can be configured to install new versions of [SOFTWARE_NAME] automatically.</p>
+<p class="akemail-announcement-visitlink">You can install the new [SOFTWARE_NAME] version either from your site''s wp-admin page, or through the main control panel of <a href="[URL]">your Akeeba Panopticon installation</a>.</p>
+</div>
+<!-- Bye, Bye -->
+<div class="akemail-outro">
+<p>Have a great day!</p>
+</div>
+<!-- Footer -->
+<div class="akemail-footer">
+<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>
+</div>
+</div>
+<!-- Legal info -->
+<div class="akemail-legalinfo">
+<p>This is an automated email. Please do not reply to it.</p>
+</div>
+</div>
+</td>
+<td width="10%">&nbsp;</td>
+</tr>
+</tbody>
+</table>
+</div>', 'Hello,
+
+
+[SOFTWARE_NAME] [NEW_VERSION] is available on “[SITE_NAME]”
+
+
+[SOFTWARE_NAME] version [NEW_VERSION] is now available for installation on
+your site “[SITE_NAME] [SITE_URL]”. Your site is currently
+running the older version [OLD_VERSION].
+
+
+==============================================================================
+! ! ! ! !  ACTION REQUIRED  ! ! ! ! !
+==============================================================================
+
+The new version will NOT be installed automatically. You will have to
+install it yourself.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Note: Akeeba Panopticon can be configured to install new versions of
+[SOFTWARE_NAME] automatically.
+
+==============================================================================
+
+
+You can install the new [SOFTWARE_NAME] version either from
+your site''s wp-admin page, or through the main control panel of your
+Akeeba Panopticon installation ([URL]).
+
+Have a great day!
+
+------------------------------------------------------------------------------
+
+This email was sent by the Panopticon installation on [URL].
+This is an automated email. Please do not reply to it.
+');
+]]></query>
+        </action>
+
+        <!-- Install mail template: plugins_update_done -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'plugins_update_done') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+    ('plugins_update_done', '*', 'Automatic software updates on [SITE_NAME]', '<div class="akemail-outer-wrapper">
+<table>
+<tbody>
+<tr>
+<td width="10%">&nbsp;</td>
+<td>
+<div class="akemail-wrapper">
+<div class="akemail-container"><!-- Logo Header -->
+<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>
+<!-- Hello -->
+<div class="akemail-hello">
+<p>Hello,</p>
+</div>
+[RENDERED_HTML] <!-- Bye, Bye -->
+<div class="akemail-outro">
+<p>Have a great day!</p>
+</div>
+<!-- Footer -->
+<div class="akemail-footer">
+<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>
+</div>
+</div>
+<!-- Legal info -->
+<div class="akemail-legalinfo">
+<p>This is an automated email. Please do not reply to it.</p>
+</div>
+</div>
+</td>
+<td width="10%">&nbsp;</td>
+</tr>
+</tbody>
+</table>
+</div>', 'Hello,
+
+
+[RENDERED_TEXT]
+
+
+Have a great day!
+
+------------------------------------------------------------------------------
+
+This email was sent by the Panopticon installation on [URL]
+This is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: domain_expiring -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'domain_expiring') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (type, language, subject, html, plaintext) values ('domain_expiring', '*', '⚠️ The domain name for “[SITE_NAME]” expires soon', '<div class="akemail-outer-wrapper">
+<table>
+<tbody>
+<tr>
+<td width="10%">&nbsp;</td>
+<td>
+<div class="akemail-wrapper">
+<div class="akemail-container"><!-- Logo Header -->
+<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>
+<!-- Hello -->
+<div class="akemail-hello">
+<p>Hello,</p>
+</div>
+<!-- Main-Topic -->
+<div class="akemail-main-topic">
+<p>The domain name for &ldquo;[SITE_NAME]&rdquo; expires soon</p>
+</div>
+<!-- Message -->
+<div class="akemail-message">
+<p>The domain name <code>[DOMAIN]</code> for your site &ldquo;<a href="[SITE_URL]">[SITE_NAME]</a>&rdquo; will expire soon, on [EXPIRATION]. Please renew your domain name with your registrar ([REGISTRAR]) to prevent losing access to your domain name, and therefore your site.</p>
+<p><strong>ℹ️ Kind reminder</strong>: If you let your domain expire someone else may register it. In this case, you will be unable to use this domain name for your site and email.</p>
+</div>
+<!-- Area Offer/Announcement -->
+<div class="akemail-announcement">
+<div class="akemail-announcement-box">
+<h3>Action required</h3>
+<p>You need to renew your domain name, [DOMAIN].</p>
+</div>
+<p class="akemail-announcement-note"><em>Note</em>: Akeeba Panopticon cannot renew domains. This is something you need to do manually through your registrar which may be different than the hosting company you use for your site. If you have already renewed your domain, don''t panic; the domain registration information publicly available to tools like Akeeba Panopticon takes a few days to be updated.</p>
+</div>
+<div class="akemail-outro">
+<p>Have a great day!</p>
+</div>
+<!-- Footer -->
+<div class="akemail-footer">
+<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>
+</div>
+</div>
+<!-- Legal info -->
+<div class="akemail-legalinfo">
+<p>This is an automated email. Please do not reply to it.</p>
+</div>
+</div>
+</td>
+<td width="10%">&nbsp;</td>
+</tr>
+</tbody>
+</table>
+</div>', 'Hello,
+
+
+The domain name for “[SITE_NAME]” expires soon
+
+
+The domain name [DOMAIN] for your site “[SITE_NAME] [/[SITE_URL]]”
+will expire soon, on [EXPIRATION]. Please renew your domain name with
+your registrar ([REGISTRAR]) to prevent losing access to your domain
+name, and therefore your site.
+
+ℹ️ KIND REMINDER: If you let your domain expire someone else may
+register it. In this case, you will be unable to use this domain name
+for your site and email.
+
+==============================================================================
+! ! ! ! !  ACTION REQUIRED  ! ! ! ! !
+==============================================================================
+
+You need to renew your domain name, [DOMAIN].
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+_Note_: Akeeba Panopticon cannot renew domains. This is something you
+need to do manually through your registrar which may be different than
+the hosting company you use for your site. If you have already renewed
+your domain, don''t panic; the domain registration information publicly
+available to tools like Akeeba Panopticon takes a few days to be updated.
+
+==============================================================================
+
+Have a great day!
+
+------------------------------------------------------------------------------
+
+This email was sent by the Panopticon installation on [URL]
+This is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Install default "Users" group -->
+        <action table="#__groups" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__groups` WHERE `title` = 'Users') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__groups` (`title`, `privileges`) VALUES ('Users', '[]');
+]]></query>
+        </action>
+
+        <!-- Groups: add per-group API token limit (NULL = use global default) -->
+        <action table="#__groups" canfail="1">
+            <condition type="missing" value="api_token_limit"/>
+            <query><![CDATA[
+ALTER TABLE `#__groups`
+    ADD COLUMN `api_token_limit` INT UNSIGNED NULL DEFAULT NULL;
+]]></query>
+        </action>
+
+        <!-- Groups: add per-group disallowed MCP tools (JSON array of tool names; NULL = no restriction) -->
+        <action table="#__groups" canfail="1">
+            <condition type="missing" value="mcp_disallowed_tools"/>
+            <query><![CDATA[
+ALTER TABLE `#__groups`
+    ADD COLUMN `mcp_disallowed_tools` JSON NULL DEFAULT NULL;
+]]></query>
+        </action>
+
+        <!-- Groups: add a badge colour (NULL = no colour, render as bg-secondary) -->
+        <action table="#__groups" canfail="1">
+            <condition type="missing" value="colour"/>
+            <query><![CDATA[
+ALTER TABLE `#__groups`
+    ADD COLUMN `colour` VARCHAR(7) NULL DEFAULT NULL;
+]]></query>
+        </action>
+
+        <!--
+            Groups: normalise `privileges` into a JSON array.
+
+            The default "Users" group used to be seeded with the JSON object `{}`, and saving a group could store an
+            object such as {"0": "panopticon.view", "2": "panopticon.admin"} because array_filter() preserves keys. Any
+            such row made the group edit page, and the group ACL checks, throw a TypeError.
+        -->
+        <action table="#__groups" canfail="1">
+            <condition type="equals" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__groups` WHERE `privileges` IS NULL OR TRIM(CAST(`privileges` AS CHAR)) NOT LIKE '[%') x;
+            ]]></condition>
+            <query><![CDATA[
+UPDATE `#__groups`
+SET `privileges` = COALESCE(JSON_EXTRACT(`privileges`, '$.*'), JSON_ARRAY())
+WHERE `privileges` IS NULL OR TRIM(CAST(`privileges` AS CHAR)) NOT LIKE '[%';
+]]></query>
+        </action>
+
+        <!-- Install mail template: registration_pending_admin -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'registration_pending_admin') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+    ('registration_pending_admin', '*', '[SITENAME] Your registration is pending approval', '<p>Hello [NAME],</p><p>Your account on <strong>[SITENAME]</strong> has been created and is pending administrator approval.</p><p>Username: <strong>[USERNAME]</strong></p><p>You will receive another email once your account has been approved.</p>', 'Hello [NAME],
+
+Your account on [SITENAME] has been created and is pending administrator approval.
+
+Username: [USERNAME]
+
+You will receive another email once your account has been approved.');
+]]></query>
+        </action>
+
+        <!-- Install mail template: registration_notify_admin -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'registration_notify_admin') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+    ('registration_notify_admin', '*', '[SITENAME] New user registration awaiting approval', '<p>Hello,</p><p>A new user has registered on <strong>[SITENAME]</strong> and is awaiting your approval.</p><p>Name: <strong>[NAME]</strong><br>Username: <strong>[USERNAME]</strong><br>Email: <strong>[EMAIL]</strong></p><p>Please visit the <a href="[ADMIN_URL]">user management area</a> to review and approve or reject this registration.</p>', 'Hello,
+
+A new user has registered on [SITENAME] and is awaiting your approval.
+
+Name: [NAME]
+Username: [USERNAME]
+Email: [EMAIL]
+
+Please visit the user management area to review and approve or reject this registration:
+[ADMIN_URL]');
+]]></query>
+        </action>
+
+        <!-- Install mail template: registration_activate -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'registration_activate') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+    ('registration_activate', '*', '[SITENAME] Activate your account', '<p>Hello [NAME],</p><p>Your account on <strong>[SITENAME]</strong> has been created. Please activate your account by clicking the link below:</p><p><a href="[ACTIVATION_URL]">[ACTIVATION_URL]</a></p><p>Username: <strong>[USERNAME]</strong></p><p>You have <strong>[EXPIRY_DAYS] days</strong> to activate your account before it is automatically deleted.</p><p>If the link does not work, visit the activation page manually and enter:<br>Token: <strong>[TOKEN]</strong></p>', 'Hello [NAME],
+
+Your account on [SITENAME] has been created. Please activate your account by visiting the following URL:
+
+[ACTIVATION_URL]
+
+Username: [USERNAME]
+
+You have [EXPIRY_DAYS] days to activate your account before it is automatically deleted.
+
+If the link does not work, visit the activation page manually and enter:
+Token: [TOKEN]');
+]]></query>
+        </action>
+
+        <!-- Install mail template: registration_approved -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'registration_approved') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+    ('registration_approved', '*', '[SITENAME] Your account has been approved', '<p>Hello [NAME],</p><p>Your account on <strong>[SITENAME]</strong> has been approved. You can now log in at:</p><p><a href="[LOGIN_URL]">[LOGIN_URL]</a></p><p>Username: <strong>[USERNAME]</strong></p>', 'Hello [NAME],
+
+Your account on [SITENAME] has been approved. You can now log in at:
+
+[LOGIN_URL]
+
+Username: [USERNAME]');
+]]></query>
+        </action>
+
+        <!-- Install mail template: registration_expired -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'registration_expired') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates` (`type`, `language`, `subject`, `html`, `plaintext`)
+VALUES
+    ('registration_expired', '*', '[SITENAME] Your registration has expired', '<p>Hello [NAME],</p><p>Your registration on <strong>[SITENAME]</strong> has expired because it was not activated in time, or too many failed activation attempts were made.</p><p>You are welcome to register again.</p>', 'Hello [NAME],
+
+Your registration on [SITENAME] has expired because it was not activated in time, or too many failed activation attempts were made.
+
+You are welcome to register again.');
+]]></query>
+        </action>
+
+        <!-- Create table: push_subscriptions -->
+        <action table="#__push_subscriptions" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__push_subscriptions`
+(
+    `id`         SERIAL,
+    `user_id`    BIGINT(20) UNSIGNED NOT NULL,
+    `endpoint`   VARCHAR(2048)       NOT NULL,
+    `key_p256dh` VARCHAR(255)        NOT NULL,
+    `key_auth`   VARCHAR(255)        NOT NULL,
+    `encoding`   VARCHAR(50)         NOT NULL DEFAULT 'aesgcm',
+    `user_agent` VARCHAR(512)        NULL,
+    `created_on` DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    INDEX `idx_user_id` (`user_id`),
+    UNIQUE INDEX `idx_endpoint` (`endpoint`(255)),
+    CONSTRAINT `fk_push_subscriptions_user` FOREIGN KEY (`user_id`) REFERENCES `#__users` (`id`) ON DELETE CASCADE
+)
+    DEFAULT COLLATE utf8mb4_unicode_ci
+    ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+        <!-- Update the #__reports table to add core_checksums action -->
+        <action table="#__reports" canfail="1">
+            <condition type="equals" value="0"><![CDATA[
+SELECT COUNT(*) FROM `INFORMATION_SCHEMA`.`COLUMNS`
+WHERE (`COLUMN_NAME` = 'action') AND (`TABLE_NAME` = '#__reports') AND (`TABLE_SCHEMA` = DATABASE())
+  AND `COLUMN_TYPE` LIKE '%\'core_checksums\'%'
+            ]]></condition>
+            <query><![CDATA[
+ALTER TABLE `#__reports` CHANGE `action` `action` ENUM('core_update_found','core_update_installed','ext_update_found','ext_update_installed','backup','filescanner','core_checksums','site_action','misc_action','site_up','site_down') NOT NULL DEFAULT 'misc_action';
+            ]]></query>
+        </action>
+
+        <!-- Migrate mail template: core_checksums_found — add LOG_URL section -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(COALESCE(LOCATE('[LOG_URL]', `html`), 0) > 0, 1, 0) AS `condition` FROM `#__mailtemplates` WHERE `type` = 'core_checksums_found' AND `language` = '*'
+            ]]></condition>
+            <query><![CDATA[
+UPDATE `#__mailtemplates`
+SET
+    `html`      = REPLACE(`html`,
+        '<pre>[MODIFIED_FILES]</pre>\r\n</div>\r\n<!-- Area Offer/Announcement -->',
+        '<pre>[MODIFIED_FILES]</pre>\r\n</div>\r\n<div class=\"akemail-message\">\r\n<p>The complete task log can be reviewed in <a href=\"[LOG_URL]\">Akeeba Panopticon</a>. The log file may also be attached to this email.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->'
+    ),
+    `plaintext` = REPLACE(`plaintext`,
+        '[MODIFIED_FILES]\r\n\r\n\r\n==',
+        '[MODIFIED_FILES]\r\n\r\nThe complete task log can be reviewed at:\r\n[LOG_URL]\r\nThe log file may also be attached to this email.\r\n\r\n\r\n=='
+    )
+WHERE `type` = 'core_checksums_found' AND `language` = '*'
+]]></query>
+        </action>
+
+        <!-- Install mail template: core_checksums_found -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'core_checksums_found') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+('core_checksums_found','*','⚠️ Core file integrity issue on "[SITE_NAME]"','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>Core file integrity issue detected on &ldquo;[SITE_NAME]&rdquo;</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>A core file integrity check on your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo; has detected <strong>[MODIFIED_COUNT] modified core file(s)</strong>.</p>\r\n<p>This may indicate that core files have been modified, either intentionally (core hacks) or by a third party (potentially malicious activity).</p>\r\n<h4>Modified files</h4>\r\n<pre>[MODIFIED_FILES]</pre>\r\n</div>\r\n<div class=\"akemail-message\">\r\n<p>The complete task log can be reviewed in <a href=\"[LOG_URL]\">Akeeba Panopticon</a>. The log file may also be attached to this email.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\"akemail-announcement\">\r\n<div class=\"akemail-announcement-box\">\r\n<h3>Action required</h3>\r\n<p>Please review the modified files listed above and take appropriate action. If these modifications are unexpected, your site may have been compromised.</p>\r\n</div>\r\n<p class=\"akemail-announcement-visitlink\">You can view the full list of modified files in <a href=\"[URL]\">your Akeeba Panopticon installation</a>.</p>\r\n</div>\r\n<!-- Bye, Bye -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nCore file integrity issue detected on \"[SITE_NAME]\"\r\n\r\n\r\nA core file integrity check on your site \"[SITE_NAME]\" ([SITE_URL])\r\nhas detected [MODIFIED_COUNT] modified core file(s).\r\n\r\nThis may indicate that core files have been modified, either\r\nintentionally (core hacks) or by a third party (potentially\r\nmalicious activity).\r\n\r\n\r\nModified files:\r\n\r\n[MODIFIED_FILES]\r\n\r\nThe complete task log can be reviewed at:\r\n[LOG_URL]\r\nThe log file may also be attached to this email.\r\n\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nPlease review the modified files listed above and take appropriate\r\naction. If these modifications are unexpected, your site may have\r\nbeen compromised.\r\n\r\n==============================================================================\r\n\r\n\r\nYou can view the full list of modified files in your Akeeba\r\nPanopticon installation ([URL]).\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+            ]]></query>
+        </action>
+
+        <!-- Install mail template: filescanner_failed -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'filescanner_failed') x
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+('filescanner_failed','*','🚨 PHP File Change Scanner failed on "[SITE_NAME]"','<div class=\"akemail-outer-wrapper\">\r\n<table>\r\n<tbody>\r\n<tr>\r\n<td width=\"10%\">&nbsp;</td>\r\n<td>\r\n<div class=\"akemail-wrapper\">\r\n<div class=\"akemail-container\"><!-- Logo Header -->\r\n<div class=\"akemail-logo\"><a href=\"[URL]\">&nbsp;<img src=\"[URL]/media/images/logo_bw_64.png\" alt=\"Panopticon &mdash; Site Monitoring\">&nbsp;</a></div>\r\n<!-- Hello -->\r\n<div class=\"akemail-hello\">\r\n<p>Hello,</p>\r\n</div>\r\n<!-- Main-Topic -->\r\n<div class=\"akemail-main-topic\">\r\n<p>PHP File Change Scanner failed on &ldquo;[SITE_NAME]&rdquo;</p>\r\n</div>\r\n<!-- Message -->\r\n<div class=\"akemail-message\">\r\n<p>The PHP File Change Scanner task on your site &ldquo;<a href=\"[SITE_URL]\">[SITE_NAME]</a>&rdquo; encountered an error and could not complete. The error received is as follows:</p>\r\n<p>[MESSAGE]</p>\r\n</div>\r\n<div class=\"akemail-message\">\r\n<p>The complete task log can be reviewed in <a href=\"[LOG_URL]\">Akeeba Panopticon</a>. The log file may also be attached to this email.</p>\r\n</div>\r\n<!-- Area Offer/Announcement -->\r\n<div class=\"akemail-announcement\">\r\n<div class=\"akemail-announcement-box\">\r\n<h3>Action required</h3>\r\n<p>Please review the error and the task log, then re-run the PHP File Change Scanner manually if needed.</p>\r\n</div>\r\n<p class=\"akemail-announcement-visitlink\">You can review the task log and re-run the scanner through <a href=\"[URL]\">your Akeeba Panopticon installation</a>.</p>\r\n</div>\r\n<!-- Bye, Bye -->\r\n<div class=\"akemail-outro\">\r\n<p>Have a great day!</p>\r\n</div>\r\n<!-- Footer -->\r\n<div class=\"akemail-footer\">\r\n<p class=\"akemail-footer-sitelink\">&nbsp;<a href=\"[URL]\">Panopticon &mdash; Site Monitoring</a></p>\r\n</div>\r\n</div>\r\n<!-- Legal info -->\r\n<div class=\"akemail-legalinfo\">\r\n<p>This is an automated email. Please do not reply to it.</p>\r\n</div>\r\n</div>\r\n</td>\r\n<td width=\"10%\">&nbsp;</td>\r\n</tr>\r\n</tbody>\r\n</table>\r\n</div>','Hello,\r\n\r\n\r\nPHP File Change Scanner failed on \"[SITE_NAME]\"\r\n\r\n\r\nThe PHP File Change Scanner task on your site \"[SITE_NAME]\" ([SITE_URL])\r\nencountered an error and could not complete. The error received is as\r\nfollows:\r\n\r\n\r\n[MESSAGE]\r\n\r\nThe complete task log can be reviewed at:\r\n[LOG_URL]\r\nThe log file may also be attached to this email.\r\n\r\n\r\n==============================================================================\r\n! ! ! ! !  ACTION REQUIRED  ! ! ! ! !\r\n==============================================================================\r\n\r\nPlease review the error and the task log, then re-run the PHP File\r\nChange Scanner manually if needed.\r\n\r\n==============================================================================\r\n\r\n\r\nYou can review the task log and re-run the scanner through your Akeeba\r\nPanopticon installation ([URL]).\r\n\r\nHave a great day!\r\n\r\n------------------------------------------------------------------------------\r\n\r\nThis email was sent by the Panopticon installation on [URL].\r\nThis is an automated email. Please do not reply to it.');
+            ]]></query>
+        </action>
+
+        <!-- Install task: sendwebpush -->
+        <action table="#__tasks" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__tasks` WHERE `type` = 'sendwebpush') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__tasks` (`type`, `cron_expression`, `enabled`, `last_exit_code`, `params`, `storage`)
+VALUES ('sendwebpush', '* * * * *', 1, 0, '{}', '{}');
+            ]]></query>
+        </action>
+
+        <!-- Install mail template: extension_install_summary -->
+        <action table="#__mailtemplates" canfail="1">
+            <condition type="equals" operator="not" value="1"><![CDATA[
+SELECT IF(myCount >= 1, 1, 0) AS `condition` FROM (SELECT COUNT(*) AS `myCount` FROM `#__mailtemplates` WHERE `type` = 'extension_install_summary') x;
+            ]]></condition>
+            <query><![CDATA[
+INSERT INTO `#__mailtemplates`
+(`type`,`language`,`subject`,`html`,`plaintext`) VALUES
+('extension_install_summary','*','[PANOPTICON] Extension installation summary','<div class="akemail-outer-wrapper">
+<table>
+<tbody>
+<tr>
+<td width="10%">&nbsp;</td>
+<td>
+<div class="akemail-wrapper">
+<div class="akemail-container"><!-- Logo Header -->
+<div class="akemail-logo"><a href="[URL]">&nbsp;<img src="[URL]/media/images/logo_bw.svg" alt="Panopticon &mdash; Site Monitoring">&nbsp;</a></div>
+<!-- Hello -->
+<div class="akemail-hello">
+<p>Hello,</p>
+</div>
+[RENDERED_HTML] <!-- Bye, Bye -->
+<div class="akemail-outro">
+<p>Have a great day!</p>
+</div>
+<!-- Footer -->
+<div class="akemail-footer">
+<p class="akemail-footer-sitelink">&nbsp;<a href="[URL]">Panopticon &mdash; Site Monitoring</a></p>
+</div>
+</div>
+<!-- Legal info -->
+<div class="akemail-legalinfo">
+<p>This is an automated email. Please do not reply to it.</p>
+</div>
+</div>
+</td>
+<td width="10%">&nbsp;</td>
+</tr>
+</tbody>
+</table>
+</div>', 'Hello,
+
+
+[RENDERED_TEXT]
+
+
+Have a great day!
+
+------------------------------------------------------------------------------
+
+This email was sent by the Panopticon installation on [URL]
+This is an automated email. Please do not reply to it.');
+]]></query>
+        </action>
+
+        <!-- Create table: api_tokens -->
+        <action table="#__api_tokens" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__api_tokens`
+(
+    `id`          SERIAL,
+    `user_id`     BIGINT(20) UNSIGNED NOT NULL,
+    `description` VARCHAR(255)        NULL,
+    `seed`        VARCHAR(128)        NOT NULL,
+    `enabled`     TINYINT(1) UNSIGNED NOT NULL DEFAULT 1,
+    `created_by`  BIGINT(20) UNSIGNED NOT NULL,
+    `created_on`  DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `modified_by` BIGINT(20) UNSIGNED NULL,
+    `modified_on` DATETIME            NULL,
+    PRIMARY KEY (`id`),
+    INDEX `idx_enabled_user` (`enabled`, `user_id`),
+    CONSTRAINT `fk_api_tokens_user` FOREIGN KEY (`user_id`) REFERENCES `#__users` (`id`) ON DELETE CASCADE
+)
+    DEFAULT COLLATE utf8mb4_unicode_ci
+    ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+        <!-- API tokens: forward-compat columns (expires_at, last_used_at, last_used_ip, scopes) -->
+        <action table="#__api_tokens" canfail="1">
+            <condition type="missing" value="expires_at"/>
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens` ADD COLUMN `expires_at` DATETIME NULL DEFAULT NULL AFTER `enabled`;
+]]></query>
+        </action>
+
+        <action table="#__api_tokens" canfail="1">
+            <condition type="missing" value="last_used_at"/>
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens` ADD COLUMN `last_used_at` DATETIME NULL DEFAULT NULL AFTER `expires_at`;
+]]></query>
+        </action>
+
+        <action table="#__api_tokens" canfail="1">
+            <condition type="missing" value="last_used_ip"/>
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens` ADD COLUMN `last_used_ip` VARBINARY(16) NULL DEFAULT NULL AFTER `last_used_at`;
+]]></query>
+        </action>
+
+        <action table="#__api_tokens" canfail="1">
+            <condition type="missing" value="scopes"/>
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens` ADD COLUMN `scopes` JSON NULL DEFAULT NULL AFTER `last_used_ip`;
+]]></query>
+        </action>
+
+        <!-- API tokens: fix the composite index ordering. The leading column should be the higher-cardinality one. -->
+        <action table="#__api_tokens" canfail="1">
+            <condition type="index" value="idx_enabled_user"/>
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens` DROP INDEX `idx_enabled_user`;
+]]></query>
+        </action>
+
+        <action table="#__api_tokens" canfail="1">
+            <condition type="index" operator="not" value="idx_user_enabled"/>
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens` ADD INDEX `idx_user_enabled` (`user_id`, `enabled`);
+]]></query>
+        </action>
+
+        <!-- API tokens: add FKs for created_by / modified_by. canfail=1 because there is no FK-existence condition type. -->
+        <action table="#__api_tokens" canfail="1">
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens`
+    ADD CONSTRAINT `fk_api_tokens_created_by` FOREIGN KEY (`created_by`) REFERENCES `#__users` (`id`) ON DELETE CASCADE;
+]]></query>
+        </action>
+
+        <action table="#__api_tokens" canfail="1">
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens`
+    ADD CONSTRAINT `fk_api_tokens_modified_by` FOREIGN KEY (`modified_by`) REFERENCES `#__users` (`id`) ON DELETE SET NULL;
+]]></query>
+        </action>
+
+        <!-- API tokens: ensure modified_on auto-updates on row change. ALTER MODIFY is naturally idempotent. -->
+        <action table="#__api_tokens" canfail="1">
+            <query><![CDATA[
+ALTER TABLE `#__api_tokens`
+    MODIFY COLUMN `modified_on` DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP;
+]]></query>
+        </action>
+
+        <!-- Create table: audit_log -->
+        <action table="#__audit_log" canfail="0">
+            <condition type="missing" value=""/>
+            <query><![CDATA[
+CREATE TABLE IF NOT EXISTS `#__audit_log`
+(
+    `id`          SERIAL,
+    `occurred_on` DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `user_id`     BIGINT UNSIGNED     NULL     DEFAULT NULL,
+    `ip`          VARBINARY(16)       NULL     DEFAULT NULL,
+    `action`      VARCHAR(64)         NOT NULL,
+    `target_type` VARCHAR(64)         NULL     DEFAULT NULL,
+    `target_id`   BIGINT UNSIGNED     NULL     DEFAULT NULL,
+    `details`     JSON                NULL     DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_audit_user_time` (`user_id`, `occurred_on`),
+    KEY `idx_audit_action_time` (`action`, `occurred_on`),
+    CONSTRAINT `fk_audit_user` FOREIGN KEY (`user_id`) REFERENCES `#__users` (`id`) ON DELETE SET NULL
+)
+    DEFAULT COLLATE utf8mb4_unicode_ci
+    ENGINE = InnoDB;
+            ]]></query>
+        </action>
+
+    </sql>
+</schema>

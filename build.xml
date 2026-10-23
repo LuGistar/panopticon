@@ -1,0 +1,560 @@
+<?xml version="1.0"?>
+
+<!--
+  ~ @package   panopticon
+  ~ @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+  ~ @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+  -->
+
+<project name="panopticon" description="Akeeba Panopticon" default="git">
+    <import file="${phing.dir}/../buildfiles/phing/common.xml"/>
+
+    <!-- Project-specific Phing task classes -->
+    <includepath classpath="${phing.dir}/build" />
+    <taskdef name="panopticonupdatejson" classname="tasks\PanopticonUpdateJson" />
+
+    <!-- Override properties set up in common.xml -->
+    <property name="dirs.root" value="${phing.dir}" override="true" />
+    <property name="dirs.phpapp" value="${phing.dir}" override="true" />
+    <property name="dirs.release" value="${dirs.root}/release" override="true" />
+    <property name="dirs.templates" value="${phing.dir}/build/templates" override="true" />
+    <property name="dirs.component" value="${phing.dir}/component" override="true" />
+    <property name="dirs.modules" value="${phing.dir}/modules" override="true" />
+    <property name="dirs.plugins" value="${phing.dir}/plugins" override="true" />
+    <property name="dirs.documentation" value="${phing.dir}/documentation" override="true" />
+
+    <!-- Load externally defined properties -->
+    <property file="${phing.dir.common}/default.properties" override="true" />
+    <property file="${phing.dir}/../build.properties" override="true" />
+    <property file="${phing.dir}/../build.${host.os}.properties" override="true" />
+    <property file="${phing.dir}/build/build.properties" override="true" />
+    <property file="${phing.dir}/build/override.properties" override="true" />
+    <property file="${phing.dir}/build.properties" override="true" />
+    <property file="${phing.dir}/override.properties" override="true" />
+
+    <!--
+    ====================================================================================================
+    File sets
+    ====================================================================================================
+    -->
+    <fileset dir="${dirs.phpapp}" id="app" expandsymboliclinks="true">
+        <include name="**" />
+
+        <!-- Do not copy the configuration and internal repo files and folders -->
+        <exclude name=".claude/**" />
+        <exclude name=".github/**" />
+        <exclude name=".idea/**" />
+        <exclude name=".phpunit.cache/**" />
+        <exclude name=".plans/**" />
+        <exclude name="assets/**" />
+        <exclude name="build/**" />
+        <exclude name="documentation/**" />
+        <exclude name="docker-testing/**" />
+        <exclude name="node_modules/**" />
+        <exclude name="release/**" />
+        <exclude name="tests/**" />
+
+        <exclude name=".dockerignore" />
+        <exclude name=".editorconfig" />
+        <exclude name=".env" />
+        <exclude name=".env.docker" />
+        <exclude name=".env.test" />
+        <exclude name=".env.production" />
+        <exclude name=".env.local" />
+        <exclude name=".env.development" />
+        <exclude name=".env.dev" />
+        <exclude name=".gitattributes" />
+        <exclude name=".gitignore" />
+        <exclude name=".htaccess" />
+        <exclude name=".phpstorm.meta.php" />
+        <exclude name="AGENTS.md" />
+        <exclude name="build.xml" />
+        <exclude name="CHANGELOG" />
+        <exclude name="CLAUDE.md" />
+        <exclude name="composer.json" />
+        <exclude name="composer.lock" />
+        <exclude name="config.php" />
+        <exclude name="config.php.*" />
+        <exclude name="config.bak*" />
+        <exclude name="docker-*.yml" />
+        <exclude name="docker-run.sh" />
+        <exclude name="Dockerfile" />
+        <exclude name="*.Dockerfile" />
+        <exclude name="*.md" />
+        <exclude name="mempalace.yaml" />
+        <exclude name="phpunit.webserver.xml" />
+        <exclude name="phpunit.xml" />
+        <exclude name="rector.php" />
+
+        <!-- Exclude translation sources (PO / POT files) -->
+        <exclude name="languages/*.po" />
+        <exclude name="languages/*.pot" />
+
+        <!-- Exclude map files -->
+        <exclude name="media/css/*.map" />
+        <exclude name="media/js/*.map" />
+
+        <!-- .gitkeep file in webfonts -->
+        <exclude name="media/webfonts/.gitkeep" />
+
+        <!-- Exclude cache, log, tmp files -->
+        <exclude name="cache/admintools/**" />
+        <exclude name="cache/akeebabackup/**" />
+        <exclude name="cache/db_backups/**" />
+        <exclude name="cache/extensions/**" />
+        <exclude name="cache/favicon/**" />
+        <exclude name="cache/http/**" />
+        <exclude name="cache/system/**" />
+        <exclude name="cache/whois/**" />
+
+        <exclude name="log/*.log" />
+        <exclude name="log/*.php" />
+        <exclude name="log/*.gz" />
+
+        <exclude name="tmp/compiled_templates/**" />
+        <exclude name="tmp/session/**" />
+
+        <exclude name="user_code/ViewTemplates/**" />
+        <exclude name="user_code/*.php" />
+        <exclude name="user_code/*.pem" />
+        <exclude name="user_code/*.json" />
+
+        <!-- Clean up Composer vendor folder -->
+        <exclude name="vendor/akeeba/awf/src/Database/Driver/None.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Driver/Pgsql.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Driver/Postgresql.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Driver/Sqlazure.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Driver/Sqlite.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Driver/Sqlsrv.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Query/Pgsql.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Query/Postgresql.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Query/Sqlazure.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Query/Sqlite.php" />
+        <exclude name="vendor/akeeba/awf/src/Database/Query/Sqlsrv.php" />
+        <exclude name="vendor/akeeba/awf/src/Encrypt/AesAdapter/Mcrypt.php" />
+        <exclude name="vendor/akeeba/awf/.idea/**" />
+        <exclude name="vendor/akeeba/awf/.gitattributes" />
+        <exclude name="vendor/akeeba/awf/.gitignore" />
+        <exclude name="vendor/akeeba/awf/.travis.yml" />
+        <exclude name="vendor/akeeba/awf/composer.lock" />
+        <exclude name="vendor/akeeba/awf/MIGRATION.md" />
+        <exclude name="vendor/akeeba/awf/phpunit*" />
+
+        <exclude name="vendor/akeeba/json-backup-api/.idea/**" />
+        <exclude name="vendor/akeeba/json-backup-api/composer.lock" />
+
+        <exclude name="vendor/akeeba/phpfinder/composer.lock" />
+
+        <exclude name="vendor/akeeba/stats_collector/.idea/**" />
+        <exclude name="vendor/akeeba/stats_collector/.gitignore" />
+        <exclude name="vendor/akeeba/stats_collector/composer.lock" />
+
+        <exclude name="vendor/bin/**" />
+
+        <exclude name="vendor/brick/math/CHANGELOG.md" />
+
+        <!-- cesargb/php-log-rotation: nothing to remove -->
+
+        <exclude name="vendor/chillerlan/php-qrcode/.github/**" />
+        <exclude name="vendor/chillerlan/php-qrcode/.idea/**" />
+        <exclude name="vendor/chillerlan/php-qrcode/.phan/**" />
+        <exclude name="vendor/chillerlan/php-qrcode/docs/**" />
+        <exclude name="vendor/chillerlan/php-qrcode/examples/**" />
+        <exclude name="vendor/chillerlan/php-qrcode/tests/**" />
+        <exclude name="vendor/chillerlan/php-qrcode/.editorconfig" />
+        <exclude name="vendor/chillerlan/php-qrcode/.gitignore" />
+        <exclude name="vendor/chillerlan/php-qrcode/.scrutinizer.yml" />
+        <exclude name="vendor/chillerlan/php-qrcode/phpcs.xml.dist" />
+        <exclude name="vendor/chillerlan/php-qrcode/phpdoc.xml.dist" />
+        <exclude name="vendor/chillerlan/php-qrcode/phpmd.xml.dist" />
+        <exclude name="vendor/chillerlan/php-qrcode/phpunit.xml.dist" />
+
+        <exclude name="vendor/chillerlan/php-settings-container/.github/**" />
+        <exclude name="vendor/chillerlan/php-settings-container/.phpstan/**" />
+        <exclude name="vendor/chillerlan/php-settings-container/docs/**" />
+        <exclude name="vendor/chillerlan/php-settings-container/examples/**" />
+        <exclude name="vendor/chillerlan/php-settings-container/tests/**" />
+        <exclude name="vendor/chillerlan/php-settings-container/.gitignore" />
+        <exclude name="vendor/chillerlan/php-settings-container/.scrutinizer.yml" />
+        <exclude name="vendor/chillerlan/php-settings-container/phpdoc.xml" />
+        <exclude name="vendor/chillerlan/php-settings-container/phpunit.xml" />
+        <exclude name="vendor/chillerlan/php-settings-container/rules-magic-access.neon" />
+
+        <!-- composer/ca-bundle: nothing to remove -->
+
+        <exclude name="vendor/delight-im/alphabets/tests/**" />
+        <exclude name="vendor/delight-im/alphabets/.editorconfig" />
+        <exclude name="vendor/delight-im/alphabets/.gitignore" />
+        <exclude name="vendor/delight-im/alphabets/composer.lock" />
+
+        <exclude name="vendor/delight-im/random/tests/**" />
+        <exclude name="vendor/delight-im/random/.editorconfig" />
+        <exclude name="vendor/delight-im/random/.gitignore" />
+        <exclude name="vendor/delight-im/random/composer.lock" />
+
+        <exclude name="vendor/dflydev/dot-access-data/CHANGELOG*" />
+
+        <!-- doctrine/deprecations: nothing to remove -->
+
+        <exclude name="vendor/dragonmantank/cron-expression/CHANGELOG*" />
+        <exclude name="vendor/dragonmantank/cron-expression/phpstan*" />
+
+        <exclude name="vendor/evenement/evenement/.gitattributes" />
+
+        <exclude name="vendor/ezyang/htmlpurifier/VERSION" />
+
+        <exclude name="vendor/fig/http-message-util/.gitignore" />
+        <exclude name="vendor/fig/http-message-util/CHANGELOG.md" />
+
+        <!-- graham-campbell/result-type: nothing to remove -->
+
+        <exclude name="vendor/guzzlehttp/guzzle/CHANGELOG.md" />
+        <exclude name="vendor/guzzlehttp/guzzle/UPGRADING.md" />
+
+        <exclude name="vendor/guzzlehttp/promises/CHANGELOG.md" />
+        <exclude name="vendor/guzzlehttp/promises/UPGRADING.md" />
+
+        <exclude name="vendor/guzzlehttp/psr7/CHANGELOG.md" />
+
+        <exclude name="vendor/io-developer/php-whois/.devcontainer/**" />
+        <exclude name="vendor/io-developer/php-whois/.github/**" />
+        <exclude name="vendor/io-developer/php-whois/bin/**" />
+        <exclude name="vendor/io-developer/php-whois/tests/**" />
+        <exclude name="vendor/io-developer/php-whois/CODE_OF_CONDUCT.md" />
+        <exclude name="vendor/io-developer/php-whois/docker-compose.yml" />
+        <exclude name="vendor/io-developer/php-whois/Dockerfile" />
+        <exclude name="vendor/io-developer/php-whois/run-tests.sh" />
+        <exclude name="vendor/io-developer/php-whois/TESTS.md" />
+
+        <exclude name="vendor/jfcherng/php-color-output/.php-cs-fixer.dist.php" />
+        <exclude name="vendor/jfcherng/php-color-output/CHANGELOG.md" />
+        <exclude name="vendor/jfcherng/php-color-output/composer.lock" />
+        <exclude name="vendor/jfcherng/php-color-output/demo.php" />
+        <exclude name="vendor/jfcherng/php-color-output/RMT" />
+        <exclude name="vendor/jfcherng/php-color-output/UPGRADING_v2.md" />
+
+        <exclude name="vendor/jfcherng/php-diff/.php-cs-fixer.dist.php" />
+        <exclude name="vendor/jfcherng/php-diff/.phpstorm.meta.php" />
+        <exclude name="vendor/jfcherng/php-diff/CHANGELOG/**" />
+        <exclude name="vendor/jfcherng/php-diff/composer.lock" />
+        <exclude name="vendor/jfcherng/php-diff/example/**" />
+        <exclude name="vendor/jfcherng/php-diff/UPGRADING/**" />
+
+        <exclude name="vendor/jfcherng/php-diff/php-mb-string/.php-cs-fixer.dist.php" />
+        <exclude name="vendor/jfcherng/php-diff/php-mb-string/CHANGELOG" />
+        <exclude name="vendor/jfcherng/php-diff/php-mb-string/composer.lock" />
+
+        <exclude name="vendor/jfcherng/php-mb-string/.php-cs-fixer.dist.php" />
+        <exclude name="vendor/jfcherng/php-mb-string/CHANGELOG" />
+        <exclude name="vendor/jfcherng/php-mb-string/composer.lock" />
+
+        <exclude name="vendor/jfcherng/php-sequence-matcher/.php-cs-fixer.dist.php" />
+        <exclude name="vendor/jfcherng/php-sequence-matcher/composer.lock" />
+
+        <!-- kevinrob/guzzle-cache-middleware: nothing to remove -->
+
+        <exclude name="vendor/lcobucci/clock/renovate.json" />
+
+        <exclude name="vendor/league/commonmark/.phpstorm.meta.php" />
+        <exclude name="vendor/league/commonmark/CHANGELOG.md" />
+
+        <exclude name="vendor/league/config/CHANGELOG.md" />
+
+        <!-- mcrumley/php-complexify: nothing to remove -->
+
+        <!-- minishlink/web-push: nothing to remove -->
+
+        <exclude name="vendor/monolog/monolog/CHANGELOG.md" />
+        <exclude name="vendor/monolog/monolog/favicon.ico" />
+        <exclude name="vendor/monolog/monolog/logo.jpg" />
+        <exclude name="vendor/monolog/monolog/src/Monolog/Test/**" />
+
+        <exclude name="vendor/nette/schema/contributing.md" />
+
+        <exclude name="vendor/nette/utils/.phpstorm.meta.php" />
+
+        <exclude name="vendor/opis/json-schema/SECURITY.md" />
+
+        <exclude name="vendor/opis/string/.editorconfig" />
+        <exclude name="vendor/opis/string/CHANGELOG.md" />
+
+        <!-- opis/uri: nothing to remove -->
+
+        <!-- paragonie/constant_time_encoding: nothing to remove -->
+
+        <exclude name="vendor/php-mcp/schema/.github/**" />
+        <exclude name="vendor/php-mcp/schema/.gitignore" />
+
+        <exclude name="vendor/php-mcp/server/.github/**" />
+        <exclude name="vendor/php-mcp/server/examples/**" />
+        <exclude name="vendor/php-mcp/server/tests/**" />
+        <exclude name="vendor/php-mcp/server/.gitignore" />
+        <exclude name="vendor/php-mcp/server/CHANGELOG.md" />
+        <exclude name="vendor/php-mcp/server/CONTRIBUTING.md" />
+        <exclude name="vendor/php-mcp/server/phpunit.xml" />
+
+        <exclude name="vendor/phpdocumentor/reflection-common/.github/**" />
+
+        <!-- phpdocumentor/reflection-docblock: nothing to remove -->
+
+        <exclude name="vendor/phpdocumentor/type-resolver/.phpdoc/**" />
+        <exclude name="vendor/phpdocumentor/type-resolver/docs/**" />
+        <exclude name="vendor/phpdocumentor/type-resolver/phpdoc.dist.xml" />
+
+        <exclude name="vendor/phpmailer/phpmailer/COMMITMENT" />
+        <exclude name="vendor/phpmailer/phpmailer/get_*.php" />
+        <exclude name="vendor/phpmailer/phpmailer/SECURITY.md" />
+        <exclude name="vendor/phpmailer/phpmailer/VERSION" />
+
+        <!-- phpoption/phpoption: nothing to remove -->
+
+        <exclude name="vendor/phpstan/phpdoc-parser/UPGRADING.md" />
+
+        <exclude name="vendor/psr/cache/CHANGELOG.md" />
+
+        <exclude name="vendor/psr/clock/CHANGELOG.md" />
+
+        <exclude name="vendor/psr/container/.gitignore" />
+
+        <exclude name="vendor/psr/event-dispatcher/.editorconfig" />
+
+        <exclude name="vendor/psr/http-client/CHANGELOG.md" />
+
+        <exclude name="vendor/psr/http-factory/.gitignore" />
+        <exclude name="vendor/psr/http-factory/.pullapprove.yml" />
+
+        <exclude name="vendor/psr/http-message/docs/**" />
+        <exclude name="vendor/psr/http-message/docs/CHANGELOG.md" />
+
+        <!-- psr/log: nothing to remove -->
+
+        <exclude name="vendor/psr/simple-cache/.editorconfig" />
+
+        <!-- ralouphie/getallheaders: nothing to remove -->
+
+        <exclude name="vendor/react/cache/CHANGELOG.md" />
+
+        <exclude name="vendor/react/dns/CHANGELOG.md" />
+
+        <exclude name="vendor/react/event-loop/CHANGELOG.md" />
+
+        <exclude name="vendor/react/http/CHANGELOG.md" />
+
+        <exclude name="vendor/react/promise/CHANGELOG.md" />
+
+        <exclude name="vendor/react/socket/CHANGELOG.md" />
+
+        <exclude name="vendor/react/stream/CHANGELOG.md" />
+
+        <exclude name="vendor/scrivo/highlight.php/.php-cs-fixer.dist.php" />
+        <exclude name="vendor/scrivo/highlight.php/AUTHORS.txt" />
+        <exclude name="vendor/scrivo/highlight.php/CONTRIBUTING.md" />
+
+        <exclude name="vendor/spomky-labs/base64url/.github/**" />
+
+        <exclude name="vendor/spomky-labs/cbor-php/CODE_OF_CONDUCT.md" />
+        <exclude name="vendor/spomky-labs/cbor-php/RELEASES.md" />
+        <exclude name="vendor/spomky-labs/cbor-php/SECURITY.md" />
+
+        <exclude name="vendor/spomky-labs/otphp/CODE_OF_CONDUCT.md" />
+        <exclude name="vendor/spomky-labs/otphp/RELEASES.md" />
+        <exclude name="vendor/spomky-labs/otphp/SECURITY.md" />
+
+        <exclude name="vendor/spomky-labs/pki-framework/SECURITY.md" />
+
+        <exclude name="vendor/symfony/cache/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/cache-contracts/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/clock/CHANGELOG.md" />
+        <exclude name="vendor/symfony/clock/Test/**" />
+
+        <exclude name="vendor/symfony/console/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/deprecation-contracts/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/error-handler/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/event-dispatcher/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/event-dispatcher-contracts/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/finder/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/http-foundation/CHANGELOG.md" />
+        <exclude name="vendor/symfony/http-foundation/Test/**" />
+
+        <exclude name="vendor/symfony/http-kernel/CHANGELOG.md" />
+
+        <!-- symfony/polyfill-ctype: nothing to remove -->
+        <!-- symfony/polyfill-intl-grapheme: nothing to remove -->
+        <!-- symfony/polyfill-intl-idn: nothing to remove -->
+        <!-- symfony/polyfill-intl-normalizer: nothing to remove -->
+        <!-- symfony/polyfill-mbstring: nothing to remove -->
+        <!-- symfony/polyfill-php80: nothing to remove -->
+        <!-- symfony/polyfill-php83: nothing to remove -->
+        <!-- symfony/polyfill-uuid: nothing to remove -->
+
+        <exclude name="vendor/symfony/property-access/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/property-info/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/serializer/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/service-contracts/CHANGELOG.md" />
+        <exclude name="vendor/symfony/service-contracts/Test/**" />
+
+        <exclude name="vendor/symfony/string/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/type-info/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/uid/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/var-dumper/CHANGELOG.md" />
+        <exclude name="vendor/symfony/var-dumper/Test/**" />
+
+        <exclude name="vendor/symfony/var-exporter/CHANGELOG.md" />
+
+        <exclude name="vendor/symfony/yaml/CHANGELOG.md" />
+
+        <!-- vlucas/phpdotenv: nothing to remove -->
+
+        <exclude name="vendor/web-auth/cose-lib/.agents/**" />
+        <exclude name="vendor/web-auth/cose-lib/CODE_OF_CONDUCT.md" />
+        <exclude name="vendor/web-auth/cose-lib/RELEASES.md" />
+        <exclude name="vendor/web-auth/cose-lib/SECURITY.md" />
+
+        <!-- web-auth/metadata-service: nothing to remove -->
+        <!-- web-auth/webauthn-lib: nothing to remove -->
+
+        <exclude name="vendor/web-token/jwt-library/.github/**" />
+
+        <exclude name="vendor/webmozart/assert/CHANGELOG.md" />
+    </fileset>
+
+    <!--
+    ====================================================================================================
+    Tasks - General
+    ====================================================================================================
+    -->
+    <target name="all" description="Makes the packages and documentation. Run release and update separately to publish."
+            depends="git,documentation">
+    </target>
+
+    <target name="git" description="Makes only packages, not the documentation"
+            depends="new-release,setup-properties,app-package">
+    </target>
+
+    <target name="git-app" description="Makes only the application package"
+            depends="new-release,setup-properties,create-pot,language,app-package">
+    </target>
+
+    <target name="setup-properties" description="Set up version and build properties">
+        <!-- Initialize the build.date timestamp -->
+        <tstamp>
+            <format property="build.date" pattern="yyyy-MM-dd" />
+        </tstamp>
+
+        <!-- Initialize the version if it's not set -->
+        <if>
+            <equals arg1="${version}" arg2="git" />
+            <then>
+                <autoversion workingCopy="${dirs.root}" propertyName="version" useCommitHash="false" />
+            </then>
+        </if>
+
+        <filterchain id="standard-tokens">
+            <replacetokens begintoken="##" endtoken="##">
+                <token key="DATE" value="${build.date}"/>
+                <token key="VERSION" value="${version}"/>
+                <token key="PRO" value="1"/>
+            </replacetokens>
+        </filterchain>
+    </target>
+
+    <target name="create-pot" description="Create the main language .POT file">
+        <exec executable="php" passthru="true">
+            <arg file="${dirs.root}/assets/ini_to_po.php"/>
+            <arg value="--pot"/>
+        </exec>
+    </target>
+
+    <target name="language" description="Create the INI language files from the PO files">
+        <exec executable="php" passthru="true">
+            <arg file="${dirs.root}/assets/po_to_ini.php"/>
+            <arg value="--all"/>
+        </exec>
+    </target>
+
+    <target name="fix-error-handling" description="Re-sync patches/symfony-error-handler/ after a symfony/error-handler update">
+        <exec executable="bash" dir="${dirs.root}" passthru="true" checkreturn="true">
+            <arg file="${dirs.root}/build/fix-error-handling.sh"/>
+        </exec>
+    </target>
+
+
+    <!--
+    ====================================================================================================
+    Tasks - Packages
+    ====================================================================================================
+    -->
+    <target name="app-package" description="Component package build"
+            depends="new-release,setup-properties">
+        <echo>Creating ZIP package</echo>
+
+        <copy file="${dirs.templates}/version.php" tofile="${dirs.phpapp}/version.php" overwrite="true">
+            <filterchain refid="standard-tokens"/>
+        </copy>
+
+        <zipme basedir="${dirs.phpapp}"
+               destfile="${dirs.release}/panopticon-${version}.zip"
+               includeemptydirs="true">
+            <fileset refid="app"/>
+        </zipme>
+    </target>
+
+    <!--
+    ====================================================================================================
+    Tasks - Documentation
+    ====================================================================================================
+    -->
+
+    <target name="documentation" description="Documentation is provided as a Wiki">
+        <!-- Intentionally left blank -->
+    </target>
+
+    <!--
+    ====================================================================================================
+    Tasks - Update JSON
+    ====================================================================================================
+    -->
+
+    <target name="updatejson" description="Create release/update.json with the latest stable GitHub release info"
+            depends="new-release">
+        <panopticonupdatejson
+            organization="${github.organization}"
+            repository="${github.repository}"
+            token="${github.token}"
+            outfile="${dirs.release}/update.json" />
+    </target>
+
+    <!-- Task to call updatejson and also upload file to getpanopticon.com site -->
+    <target name="update" depends="updatejson">
+        <echo>Uploading ${docsdeploy.name}</echo>
+        <curlsftp
+                host="${getpanopticon.host}"
+                port="${getpanopticon.port}"
+                username="${getpanopticon.username}"
+                password="${getpanopticon.password}"
+                pubkeyfile="${getpanopticon.pubkeyfile}"
+                privkeyfile="${getpanopticon.privkeyfile}"
+                privkeyfilepassphrase="${getpanopticon.privkeyfilepassphrase}"
+                todir="${getpanopticon.path}"
+                level="debug">
+            <fileset dir="${dirs.release}">
+                <include name="update.json"/>
+            </fileset>
+        </curlsftp>
+    </target>
+
+</project>

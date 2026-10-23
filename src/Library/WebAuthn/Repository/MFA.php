@@ -1,0 +1,211 @@
+<?php
+/**
+ * @package   panopticon
+ * @copyright Copyright (c)2023-2026 Nicholas K. Dionysopoulos / Akeeba Ltd
+ * @license   https://www.gnu.org/licenses/agpl-3.0.txt GNU Affero General Public License, version 3 or later
+ */
+
+namespace Akeeba\Panopticon\Library\WebAuthn\Repository;
+
+use Akeeba\Panopticon\Factory;
+use Akeeba\Panopticon\Model\Mfa as MfaModel;
+use Awf\Container\ContainerAwareInterface;
+use Awf\Container\ContainerAwareTrait;
+use Symfony\Component\Serializer\SerializerInterface;
+use Webauthn\AttestationStatement\AttestationStatementSupportManager;
+use Webauthn\AttestationStatement\NoneAttestationStatementSupport;
+use Webauthn\CredentialRecord;
+use Webauthn\Denormalizer\WebauthnSerializerFactory;
+use Webauthn\PublicKeyCredentialSource;
+use Webauthn\PublicKeyCredentialUserEntity;
+
+defined('AKEEBA') || die;
+
+class MFA implements ContainerAwareInterface
+{
+	use ContainerAwareTrait;
+
+	/**
+	 * The user ID we will operate with
+	 *
+	 * @var   int
+	 * @since 1.0.0
+	 */
+	private int $userId = 0;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param   int|null  $userid  The user ID this repository will be working with.
+	 *
+	 * @since   1.0.0
+	 */
+	public function __construct(?int $userid = null)
+	{
+		$this->setContainer(Factory::getContainer());
+
+		if (empty($userid))
+		{
+			$userid = Factory::getContainer()->userManager->getUser()->getId();
+		}
+
+		$this->userId = $userid;
+	}
+
+	public function findOneByCredentialId(string $publicKeyCredentialId): ?CredentialRecord
+	{
+		$publicKeyCredentialUserEntity = new PublicKeyCredentialUserEntity('', $this->userId, '', '');
+
+		$credentials = $this->findAllForUserEntity($publicKeyCredentialUserEntity);
+
+		return array_reduce(
+			$credentials,
+			fn($carry, $record) => $carry ?? (
+			$record->publicKeyCredentialId == $publicKeyCredentialId
+				? $record
+				: null
+			),
+			null
+		);
+	}
+
+	public function findAllForUserEntity(PublicKeyCredentialUserEntity $publicKeyCredentialUserEntity): array
+	{
+		$userId = $publicKeyCredentialUserEntity->id;
+
+		$results = $this->getContainer()->mvcFactory->makeTempModel('Mfa')
+			->where('user_id', values: $userId)
+			->get(true)
+			->filter(fn(MfaModel $mfa) => !empty($mfa->options));
+
+		$numBackupCodes = $results
+			->filter(fn(MfaModel $mfa) => $mfa->method === 'backupcodes')
+			->count();
+
+		// Having only backup codes is as good as having no methods.
+		if ($results->count() < 1 || $numBackupCodes === $results->count())
+		{
+			return [];
+		}
+
+		$serializer  = $this->getCredentialSerializer();
+		$arrayKeys   = $results->modelKeys();
+		$arrayValues = $results
+			->map(function (MfaModel $result) use ($userId, $serializer) {
+				$options = $result->getOptions();
+
+				if (empty($options) || !isset($options['pubkeysource']))
+				{
+					return null;
+				}
+
+				try
+				{
+					if (is_string($options['pubkeysource']))
+					{
+						return $serializer->deserialize(
+							$options['pubkeysource'], CredentialRecord::class, 'json'
+						);
+					}
+					elseif (is_array($options['pubkeysource']))
+					{
+						return $serializer->deserialize(
+							json_encode($options['pubkeysource']), CredentialRecord::class, 'json'
+						);
+					}
+				}
+				catch (\Throwable)
+				{
+					return null;
+				}
+
+				return null;
+			})
+			->toArray();
+
+		unset($results);
+
+		return array_filter(
+			array_combine($arrayKeys, $arrayValues)
+		);
+	}
+
+	public function saveCredentialSource(PublicKeyCredentialSource $publicKeyCredentialSource): void
+	{
+		// I can only create or update credentials for the user this class was created for
+		if ($publicKeyCredentialSource->userHandle != $this->userId)
+		{
+			throw new \RuntimeException('Cannot create or update WebAuthn credentials for a different user.', 403);
+		}
+
+		// Do I have an existing record for this credential?
+		$recordId                      = null;
+		$publicKeyCredentialUserEntity = new PublicKeyCredentialUserEntity('', $this->userId, '', '');
+		$credentials                   = $this->findAllForUserEntity($publicKeyCredentialUserEntity);
+
+		foreach ($credentials as $id => $record)
+		{
+			if ($record->publicKeyCredentialId != $publicKeyCredentialSource->publicKeyCredentialId)
+			{
+				continue;
+			}
+
+			$recordId = $id;
+
+			break;
+		}
+
+		$serializer = $this->getCredentialSerializer();
+
+		/** @var \Akeeba\Panopticon\Model\Mfa $mfaModel */
+		$mfaModel = $this->getContainer()->mvcFactory->makeTempModel('Mfa');
+
+		if ($recordId)
+		{
+			$mfaModel->findOrFail($recordId);
+
+			$options = $mfaModel->getOptions();
+
+			if (isset($options['attested']))
+			{
+				unset($options['attested']);
+			}
+
+			$options['pubkeysource'] = $serializer->serialize($publicKeyCredentialSource, 'json');
+			$mfaModel->save(
+				[
+					'options' => json_encode($options),
+				]
+			);
+		}
+		else
+		{
+			$mfaModel->reset();
+			$mfaModel->save(
+				[
+					'user_id' => $this->userId,
+					'title'   => 'WebAuthn auto-save',
+					'method'  => 'webauthn',
+					'default' => 0,
+					'options' => json_encode(
+						['pubkeysource' => $serializer->serialize($publicKeyCredentialSource, 'json')]
+					),
+				]
+			);
+		}
+	}
+
+	/**
+	 * Create a Symfony Serializer configured for WebAuthn credential source serialization.
+	 *
+	 * @return  SerializerInterface
+	 * @since   1.0.0
+	 */
+	private function getCredentialSerializer(): SerializerInterface
+	{
+		$asSM = new AttestationStatementSupportManager();
+		$asSM->add(new NoneAttestationStatementSupport());
+
+		return (new WebauthnSerializerFactory($asSM))->create();
+	}
+}
