@@ -1,0 +1,101 @@
+name: Build Panopticon for Plesk
+
+on:
+  push:
+    branches:
+      - release-2.4.0
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: panopticon-plesk-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Panopticon source
+        uses: actions/checkout@v4
+        with:
+          path: source
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: curl, dom, mbstring, pdo_mysql, simplexml, zip
+          coverage: none
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Install Sass CLI
+        run: npm install --global sass
+
+      - name: Build production application
+        working-directory: source
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.GITHUB_TOKEN }}"}}'
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Validate build
+        run: |
+          test -s source/vendor/autoload.php
+          test -s source/version.php
+          test -d source/media/tinymce
+          test -f source/htaccess.txt
+
+      - name: Publish built files to plesk-deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          if git ls-remote --exit-code "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/plesk-deploy >/dev/null 2>&1; then
+            git clone --depth 1 --branch plesk-deploy "${REPO_URL}" plesk-deploy
+          else
+            mkdir plesk-deploy
+            git -C plesk-deploy init -b plesk-deploy
+            git -C plesk-deploy remote add origin "${REPO_URL}"
+          fi
+
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.env*' \
+            --exclude='config.php*' \
+            --exclude='node_modules/' \
+            --exclude='tests/' \
+            --exclude='build/' \
+            --exclude='assets/' \
+            --exclude='release/' \
+            --exclude='documentation/' \
+            --exclude='.idea/' \
+            --exclude='.phpunit.cache/' \
+            --exclude='Dockerfile' \
+            --exclude='docker-compose*.yml' \
+            --exclude='README.md' \
+            source/ plesk-deploy/
+
+          cp source/htaccess.txt plesk-deploy/.htaccess
+
+          git -C plesk-deploy config user.name "github-actions[bot]"
+          git -C plesk-deploy config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C plesk-deploy add --all
+
+          if ! git -C plesk-deploy diff --cached --quiet; then
+            git -C plesk-deploy commit -m "Build Panopticon from ${GITHUB_SHA}"
+          fi
+
+          git -C plesk-deploy push origin HEAD:refs/heads/plesk-deploy
